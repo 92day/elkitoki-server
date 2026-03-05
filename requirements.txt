@@ -4,7 +4,7 @@ sqlalchemy
 pymysql
 anthropic
 openai
-pyserial
+serial
 flask
 flask-cors
 deep-translator
