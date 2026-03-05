@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+sqlalchemy
+pymysql
+anthropic
+openai
+pyserial
+flask
+flask-cors
+deep-translator
