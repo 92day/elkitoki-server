@@ -1,33 +1,41 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
+﻿from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+from sqlalchemy.orm import Session
+
 from database import get_db
 from models.models import Alert
 
-router = APIRouter(prefix="/api/alerts", tags=["alerts"])
+router = APIRouter(prefix='/api/alerts', tags=['alerts'])
 
 
 class AlertCreate(BaseModel):
     level: str
     message: str
-    source: Optional[str] = "수동 입력"
+    source: Optional[str] = 'Manual Input'
 
 
-@router.get("/")
+@router.get('/')
 def get_alerts(db: Session = Depends(get_db)):
-    return db.query(Alert).filter(Alert.is_resolved == False).order_by(Alert.created_at.desc()).all()
+    return db.query(Alert).filter(Alert.is_resolved.is_(False)).order_by(Alert.created_at.desc()).all()
 
-@router.post("/")
+
+@router.post('/')
 def create_alert(data: AlertCreate, db: Session = Depends(get_db)):
-    alert = Alert(**data.dict())
-    db.add(alert); db.commit(); db.refresh(alert)
+    alert = Alert(**data.model_dump())
+    db.add(alert)
+    db.commit()
+    db.refresh(alert)
     return alert
 
-@router.patch("/{alert_id}/resolve")
+
+@router.patch('/{alert_id}/resolve')
 def resolve_alert(alert_id: int, db: Session = Depends(get_db)):
     alert = db.query(Alert).filter(Alert.id == alert_id).first()
-    if alert:
-        alert.is_resolved = True
-        db.commit()
-    return {"message": "처리 완료"}
+    if not alert:
+        raise HTTPException(status_code=404, detail='Alert not found.')
+
+    alert.is_resolved = True
+    db.commit()
+    return {'message': 'Resolved'}

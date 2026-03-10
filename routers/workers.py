@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models.models import Worker
 
-router = APIRouter(prefix="/api/workers", tags=["workers"])
+router = APIRouter(prefix='/api/workers', tags=['workers'])
 
 
 class WorkerCreate(BaseModel):
@@ -16,7 +16,7 @@ class WorkerCreate(BaseModel):
     role: Optional[str] = None
     phone: Optional[str] = None
     zone_id: Optional[int] = None
-    status: Optional[str] = "work"
+    status: Optional[str] = 'work'
 
 
 class WorkerUpdate(BaseModel):
@@ -26,63 +26,57 @@ class WorkerUpdate(BaseModel):
     phone: Optional[str] = None
 
 
-@router.get("/")
+@router.get('/')
 def get_workers(db: Session = Depends(get_db)):
     return db.query(Worker).all()
 
 
-@router.get("/{worker_id}")
+@router.get('/{worker_id}')
 def get_worker(worker_id: int, db: Session = Depends(get_db)):
     worker = db.query(Worker).filter(Worker.id == worker_id).first()
     if not worker:
-        raise HTTPException(status_code=404, detail="작업자를 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail='Worker not found.')
     return worker
 
 
-@router.post("/")
+@router.post('/')
 def create_worker(data: WorkerCreate, db: Session = Depends(get_db)):
-    worker = Worker(**data.dict())
+    worker = Worker(**data.model_dump())
     db.add(worker)
     try:
         db.commit()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(
-            status_code=400,
-            detail="유효하지 않은 담당 구역입니다. zones 테이블 초기화 상태를 확인하세요.",
-        )
+        raise HTTPException(status_code=400, detail='Invalid zone_id. Check the zones table.')
     db.refresh(worker)
     return worker
 
 
-@router.patch("/{worker_id}")
+@router.patch('/{worker_id}')
 def update_worker(worker_id: int, data: WorkerUpdate, db: Session = Depends(get_db)):
     worker = db.query(Worker).filter(Worker.id == worker_id).first()
     if not worker:
-        raise HTTPException(status_code=404, detail="작업자를 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail='Worker not found.')
 
-    update_data = data.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
+    for key, value in data.model_dump(exclude_none=True).items():
         setattr(worker, key, value)
 
     try:
         db.commit()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(
-            status_code=400,
-            detail="유효하지 않은 담당 구역입니다. zones 테이블 초기화 상태를 확인하세요.",
-        )
+        raise HTTPException(status_code=400, detail='Invalid zone_id. Check the zones table.')
+
     db.refresh(worker)
     return worker
 
 
-@router.delete("/{worker_id}")
+@router.delete('/{worker_id}')
 def delete_worker(worker_id: int, db: Session = Depends(get_db)):
     worker = db.query(Worker).filter(Worker.id == worker_id).first()
     if not worker:
-        raise HTTPException(status_code=404, detail="작업자를 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail='Worker not found.')
 
     db.delete(worker)
     db.commit()
-    return {"message": "삭제 완료"}
+    return {'message': 'Deleted'}
