@@ -10,14 +10,15 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / '.env', override=False)
+
 from database import get_db
-from gemini_client import analyze_image
+from gemini_client import analyze_image, is_gemini_configured
 from models.models import Alert, Photo
 
-load_dotenv()
 router = APIRouter(prefix='/api/photos', tags=['photos'])
 
-BASE_DIR = Path(__file__).resolve().parent.parent
 upload_dir_value = os.getenv('UPLOAD_DIR', './uploads')
 UPLOAD_DIR = Path(upload_dir_value)
 if not UPLOAD_DIR.is_absolute():
@@ -110,17 +111,28 @@ async def _analyze_photo(image_bytes: bytes, ext: str) -> tuple[str, bool]:
     }
     mime_type = media_map.get(ext.lower(), 'image/jpeg')
 
+    if not is_gemini_configured():
+        return (
+            'AI analysis unavailable. Configure GEMINI_API_KEY in the server .env file and restart the backend.',
+            False,
+        )
+
     prompt = (
-        'You are a construction site safety expert. Analyze the image and respond in English.\n'
-        'Format:\n'
-        '1. Current site activity summary (1-2 sentences)\n'
-        '2. Detected safety risks (write none if there are no issues)\n'
-        '3. Whether safety equipment is being worn\n'
-        '4. Final decision: risk or normal\n'
-        'The last line must be exactly RISK:YES or RISK:NO.'
+        'You are a construction site safety inspector. Analyze the uploaded site photo and respond in English.\n'
+        'Keep the answer concise and practical for a site manager.\n'
+        'Required format:\n'
+        '1. Scene Summary: one short sentence\n'
+        '2. Hazard Points: bullet list with the exact dangerous area or object and why it is dangerous. Write "- none" if safe.\n'
+        '3. PPE Check: whether helmets, vests, harnesses, gloves, or boots appear to be missing\n'
+        '4. Recommended Action: one short action for the manager\n'
+        '5. Final line must be exactly RISK:YES or RISK:NO\n'
+        'If there is a fall risk, struck-by risk, heavy equipment conflict, fire/electrical issue, or missing PPE, mark RISK:YES.'
     )
 
     result_text = analyze_image(prompt, image_bytes, mime_type, max_output_tokens=500)
-    risk_detected = 'RISK:YES' in result_text.upper()
+    upper_text = result_text.upper()
+    risk_detected = 'RISK:YES' in upper_text
     clean_text = result_text.replace('RISK:YES', '').replace('RISK:NO', '').strip()
+    if not clean_text:
+        clean_text = 'AI analysis completed, but no readable summary was returned.'
     return clean_text, risk_detected
