@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
 
 from database import SessionLocal, engine
-from models.models import Base, Worker, Zone
+from models.models import Alert, Base, Photo, SensorData, Worker, Zone
 from routers import alerts, auth, photos, report, translations, weather, workers
 
 
@@ -20,19 +20,29 @@ def seed_default_zones() -> None:
             {'id': 1, 'name': 'Zone A', 'description': 'B2', 'task': 'Rebar Work', 'risk_level': 'safe'},
             {'id': 2, 'name': 'Zone B', 'description': 'B1', 'task': 'Concrete', 'risk_level': 'safe'},
             {'id': 3, 'name': 'Zone C', 'description': '1F-3F', 'task': 'High-altitude Work', 'risk_level': 'caution'},
-            {'id': 4, 'name': 'Zone D', 'description': '4F-6F', 'task': 'Frame Construction', 'risk_level': 'safe'},
-            {'id': 5, 'name': 'Zone E', 'description': 'Roof', 'task': 'Roof Work', 'risk_level': 'danger'},
-            {'id': 6, 'name': 'Zone F', 'description': 'Exterior', 'task': 'Facade Finishing', 'risk_level': 'safe'},
         ]
+        deprecated_zone_ids = [4, 5, 6]
 
-        existing_ids = {row[0] for row in db.query(Zone.id).filter(Zone.id.in_([1, 2, 3, 4, 5, 6])).all()}
+        db.query(Worker).filter(Worker.zone_id.in_(deprecated_zone_ids)).update({Worker.zone_id: None}, synchronize_session=False)
+        db.query(SensorData).filter(SensorData.zone_id.in_(deprecated_zone_ids)).update({SensorData.zone_id: None}, synchronize_session=False)
+        db.query(Photo).filter(Photo.zone_id.in_(deprecated_zone_ids)).update({Photo.zone_id: None}, synchronize_session=False)
+        db.query(Alert).filter(Alert.zone_id.in_(deprecated_zone_ids)).update(
+            {Alert.zone_id: None, Alert.zone_name: None},
+            synchronize_session=False,
+        )
+        db.query(Zone).filter(Zone.id.in_(deprecated_zone_ids)).delete(synchronize_session=False)
+
+        existing_ids = {row[0] for row in db.query(Zone.id).filter(Zone.id.in_([1, 2, 3])).all()}
         for zone in defaults:
             if zone['id'] not in existing_ids:
                 db.add(Zone(**zone))
+            else:
+                db.query(Zone).filter(Zone.id == zone['id']).update(zone, synchronize_session=False)
 
         db.commit()
     finally:
         db.close()
+
 
 
 def seed_default_workers() -> None:
@@ -131,3 +141,4 @@ os.makedirs(uploads_dir, exist_ok=True)
 os.makedirs(os.path.join(uploads_dir, 'audio'), exist_ok=True)
 os.makedirs(os.path.join(uploads_dir, 'photos'), exist_ok=True)
 app.mount('/uploads', StaticFiles(directory=uploads_dir), name='uploads')
+

@@ -134,10 +134,7 @@ INSERT INTO `zones` (`id`, `name`, `description`, `task`, `risk_level`, `max_wor
 VALUES
   (1, 'Zone A', 'B2', 'Rebar Work', 'safe', 30),
   (2, 'Zone B', 'B1', 'Concrete', 'safe', 30),
-  (3, 'Zone C', '1F-3F', 'High-altitude Work', 'caution', 30),
-  (4, 'Zone D', '4F-6F', 'Frame Construction', 'safe', 30),
-  (5, 'Zone E', 'Roof', 'Roof Work', 'danger', 30),
-  (6, 'Zone F', 'Exterior', 'Facade Finishing', 'safe', 30)
+  (3, 'Zone C', '1F-3F', 'High-altitude Work', 'caution', 30)
 ON DUPLICATE KEY UPDATE
   `name` = VALUES(`name`),
   `description` = VALUES(`description`),
@@ -150,3 +147,4 @@ SELECT '구이일', '소장', '010-0000-0000', 'work'
 WHERE NOT EXISTS (
   SELECT 1 FROM `workers` WHERE `name` = '구이일' AND `role` = '소장'
 );
+
