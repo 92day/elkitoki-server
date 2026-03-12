@@ -110,3 +110,16 @@ ON DUPLICATE KEY UPDATE
   `task` = VALUES(`task`),
   `risk_level` = VALUES(`risk_level`),
   `max_workers` = VALUES(`max_workers`);
+
+
+CREATE TABLE IF NOT EXISTS `users` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `username` VARCHAR(50) NOT NULL,
+  `password_hash` VARCHAR(255) NOT NULL,
+  `name` VARCHAR(50) NOT NULL,
+  `role` VARCHAR(50) NOT NULL DEFAULT 'site_manager',
+  `is_active` BOOLEAN NULL DEFAULT TRUE,
+  `created_at` DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_users_username` (`username`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

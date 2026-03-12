@@ -1,4 +1,5 @@
-﻿from typing import Optional
+﻿from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -17,6 +18,8 @@ class WorkerCreate(BaseModel):
     phone: Optional[str] = None
     zone_id: Optional[int] = None
     status: Optional[str] = 'work'
+    heart_rate: Optional[int] = None
+    shift_started_at: Optional[datetime] = None
 
 
 class WorkerUpdate(BaseModel):
@@ -24,6 +27,13 @@ class WorkerUpdate(BaseModel):
     zone_id: Optional[int] = None
     status: Optional[str] = None
     phone: Optional[str] = None
+    heart_rate: Optional[int] = None
+    shift_started_at: Optional[datetime] = None
+
+
+class WorkerVitalsUpdate(BaseModel):
+    heart_rate: Optional[int] = None
+    shift_started_at: Optional[datetime] = None
 
 
 @router.get('/')
@@ -41,7 +51,11 @@ def get_worker(worker_id: int, db: Session = Depends(get_db)):
 
 @router.post('/')
 def create_worker(data: WorkerCreate, db: Session = Depends(get_db)):
-    worker = Worker(**data.model_dump())
+    payload = data.model_dump()
+    if payload.get('status') == 'work' and not payload.get('shift_started_at'):
+      payload['shift_started_at'] = datetime.now(timezone.utc)
+
+    worker = Worker(**payload)
     db.add(worker)
     try:
         db.commit()
@@ -58,7 +72,12 @@ def update_worker(worker_id: int, data: WorkerUpdate, db: Session = Depends(get_
     if not worker:
         raise HTTPException(status_code=404, detail='Worker not found.')
 
-    for key, value in data.model_dump(exclude_none=True).items():
+    updates = data.model_dump(exclude_none=True)
+
+    if updates.get('status') == 'work' and worker.shift_started_at is None and 'shift_started_at' not in updates:
+        updates['shift_started_at'] = datetime.now(timezone.utc)
+
+    for key, value in updates.items():
         setattr(worker, key, value)
 
     try:
@@ -67,6 +86,21 @@ def update_worker(worker_id: int, data: WorkerUpdate, db: Session = Depends(get_
         db.rollback()
         raise HTTPException(status_code=400, detail='Invalid zone_id. Check the zones table.')
 
+    db.refresh(worker)
+    return worker
+
+
+@router.patch('/{worker_id}/vitals')
+def update_worker_vitals(worker_id: int, data: WorkerVitalsUpdate, db: Session = Depends(get_db)):
+    worker = db.query(Worker).filter(Worker.id == worker_id).first()
+    if not worker:
+        raise HTTPException(status_code=404, detail='Worker not found.')
+
+    updates = data.model_dump(exclude_none=True)
+    for key, value in updates.items():
+        setattr(worker, key, value)
+
+    db.commit()
     db.refresh(worker)
     return worker
 

@@ -54,6 +54,13 @@ def patch_legacy_schema() -> None:
             if 'target_language' not in report_columns:
                 conn.execute(text('ALTER TABLE reports ADD COLUMN target_language VARCHAR(10) NULL'))
 
+        if 'workers' in table_names:
+            worker_columns = {column['name'] for column in inspector.get_columns('workers')}
+            if 'heart_rate' not in worker_columns:
+                conn.execute(text('ALTER TABLE workers ADD COLUMN heart_rate INTEGER NULL'))
+            if 'shift_started_at' not in worker_columns:
+                conn.execute(text('ALTER TABLE workers ADD COLUMN shift_started_at DATETIME NULL'))
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -67,7 +74,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title='Elkitoki Site API', version='2.3', lifespan=lifespan)
+app = FastAPI(title='Elkitoki Site API', version='2.4', lifespan=lifespan)
 
 
 @app.get('/health')

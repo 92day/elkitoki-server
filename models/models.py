@@ -14,6 +14,8 @@ class Worker(Base):
     phone = Column(String(20))
     zone_id = Column(Integer, ForeignKey('zones.id'), nullable=True)
     status = Column(String(20), default='work')
+    heart_rate = Column(Integer, nullable=True)
+    shift_started_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     zone = relationship('Zone', back_populates='workers')

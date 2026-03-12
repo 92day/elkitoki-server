@@ -15,8 +15,8 @@ router = APIRouter(prefix='/api/auth', tags=['auth'])
 SESSION_TTL_HOURS = int(os.getenv('AUTH_SESSION_HOURS', '24'))
 DEFAULT_ADMIN_USERNAME = os.getenv('DEFAULT_ADMIN_USERNAME', 'admin')
 DEFAULT_ADMIN_PASSWORD = os.getenv('DEFAULT_ADMIN_PASSWORD', 'admin1234!')
-DEFAULT_ADMIN_NAME = os.getenv('DEFAULT_ADMIN_NAME', 'Gu Yil')
-DEFAULT_ADMIN_ROLE = os.getenv('DEFAULT_ADMIN_ROLE', 'site_manager')
+DEFAULT_ADMIN_NAME = os.getenv('DEFAULT_ADMIN_NAME', '구이일')
+DEFAULT_ADMIN_ROLE = os.getenv('DEFAULT_ADMIN_ROLE', '\uc18c\uc7a5')
 
 _sessions: dict[str, dict] = {}
 
@@ -79,6 +79,11 @@ def seed_default_admin() -> None:
     try:
         existing_user = db.query(User).filter(User.username == DEFAULT_ADMIN_USERNAME).first()
         if existing_user:
+            if existing_user.name != DEFAULT_ADMIN_NAME:
+                existing_user.name = DEFAULT_ADMIN_NAME
+            if existing_user.role != DEFAULT_ADMIN_ROLE:
+                existing_user.role = DEFAULT_ADMIN_ROLE
+            db.commit()
             return
 
         if db.query(User).count() > 0:
