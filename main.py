@@ -9,7 +9,7 @@ from sqlalchemy import inspect, text
 
 from database import SessionLocal, engine
 from models.models import Base, Zone
-from routers import alerts, auth, photos, report, sensors, translations, weather, workers
+from routers import alerts, auth, photos, report, translations, weather, workers
 
 
 def seed_default_zones() -> None:
@@ -69,7 +69,7 @@ async def lifespan(app: FastAPI):
     seed_default_zones()
 
     if os.getenv('ENABLE_ARDUINO', '0') == '1':
-        asyncio.create_task(sensors.read_arduino_serial())
+        asyncio.create_task(alerts.read_arduino_serial())
 
     yield
 
@@ -91,7 +91,7 @@ app.add_middleware(
 
 app.include_router(workers.router)
 app.include_router(alerts.router)
-app.include_router(sensors.router)
+app.include_router(alerts.sensor_router)
 app.include_router(photos.router)
 app.include_router(report.router)
 app.include_router(translations.router)
@@ -104,3 +104,4 @@ os.makedirs(uploads_dir, exist_ok=True)
 os.makedirs(os.path.join(uploads_dir, 'audio'), exist_ok=True)
 os.makedirs(os.path.join(uploads_dir, 'photos'), exist_ok=True)
 app.mount('/uploads', StaticFiles(directory=uploads_dir), name='uploads')
+
