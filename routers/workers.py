@@ -152,3 +152,4 @@ def delete_worker(worker_id: int, db: Session = Depends(get_db)):
     db.delete(worker)
     db.commit()
     return {'message': 'Deleted'}
+
