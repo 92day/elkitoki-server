@@ -1,4 +1,4 @@
-﻿CREATE DATABASE IF NOT EXISTS `construction_db`
+CREATE DATABASE IF NOT EXISTS `construction_db`
   CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
 
@@ -102,22 +102,6 @@ CREATE TABLE IF NOT EXISTS `photos` (
     FOREIGN KEY (`zone_id`) REFERENCES `zones` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS `workers` (
-  `id` INT NOT NULL AUTO_INCREMENT,
-  `name` VARCHAR(50) NOT NULL,
-  `role` VARCHAR(50) NULL,
-  `phone` VARCHAR(20) NULL,
-  `zone_id` INT NULL,
-  `status` VARCHAR(20) NULL DEFAULT 'work',
-  `heart_rate` INT NULL,
-  `shift_started_at` DATETIME NULL,
-  `created_at` DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  KEY `idx_workers_zone_id` (`zone_id`),
-  CONSTRAINT `fk_workers_zone_id`
-    FOREIGN KEY (`zone_id`) REFERENCES `zones` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 CREATE TABLE IF NOT EXISTS `users` (
   `id` INT NOT NULL AUTO_INCREMENT,
   `username` VARCHAR(50) NOT NULL,
@@ -128,6 +112,26 @@ CREATE TABLE IF NOT EXISTS `users` (
   `created_at` DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_users_username` (`username`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `workers` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `user_id` INT NULL,
+  `name` VARCHAR(50) NOT NULL,
+  `role` VARCHAR(50) NULL,
+  `phone` VARCHAR(20) NULL,
+  `zone_id` INT NULL,
+  `status` VARCHAR(20) NULL DEFAULT 'work',
+  `heart_rate` INT NULL,
+  `shift_started_at` DATETIME NULL,
+  `created_at` DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_workers_user_id` (`user_id`),
+  KEY `idx_workers_zone_id` (`zone_id`),
+  CONSTRAINT `fk_workers_user_id`
+    FOREIGN KEY (`user_id`) REFERENCES `users` (`id`),
+  CONSTRAINT `fk_workers_zone_id`
+    FOREIGN KEY (`zone_id`) REFERENCES `zones` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT INTO `zones` (`id`, `name`, `description`, `task`, `risk_level`, `max_workers`)
@@ -142,9 +146,15 @@ ON DUPLICATE KEY UPDATE
   `risk_level` = VALUES(`risk_level`),
   `max_workers` = VALUES(`max_workers`);
 
-INSERT INTO `workers` (`name`, `role`, `phone`, `status`)
-SELECT '구이일', '소장', '010-0000-0000', 'work'
+INSERT INTO `workers` (`user_id`, `name`, `role`, `phone`, `status`)
+SELECT `users`.`id`, '구이일', '소장', '010-0000-0000', 'work'
+FROM `users`
+WHERE `users`.`username` = 'admin'
+  AND NOT EXISTS (
+    SELECT 1 FROM `workers` WHERE `workers`.`user_id` = `users`.`id`
+  )
+UNION ALL
+SELECT NULL, '구이일', '소장', '010-0000-0000', 'work'
 WHERE NOT EXISTS (
   SELECT 1 FROM `workers` WHERE `name` = '구이일' AND `role` = '소장'
 );
-

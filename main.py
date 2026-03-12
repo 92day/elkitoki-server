@@ -12,6 +12,21 @@ from models.models import Alert, Base, Photo, SensorData, User, Worker, Zone
 from routers import alerts, auth, photos, report, translations, weather, workers
 
 
+def map_user_role_to_worker_role(user_role: str | None) -> str:
+    if not user_role:
+        return '\uAE30\uD0C0'
+
+    role_map = {
+        'site_manager': '\uC18C\uC7A5',
+        '\uC18C\uC7A5': '\uC18C\uC7A5',
+        '\uC548\uC804\uAD00\uB9AC\uC790': '\uC548\uC804\uAD00\uB9AC\uC790',
+        '\uD604\uC7A5\uAD00\uB9AC\uC790': '\uD604\uC7A5\uAD00\uB9AC\uC790',
+        '\uD604\uC7A5\uC791\uC5C5\uC790': '\uD604\uC7A5\uC791\uC5C5\uC790',
+        '\uAE30\uD0C0': '\uAE30\uD0C0',
+    }
+    return role_map.get(user_role, '\uAE30\uD0C0')
+
+
 def seed_default_zones() -> None:
     auth.seed_default_admin()
     db = SessionLocal()
@@ -48,27 +63,34 @@ def seed_default_zones() -> None:
 def seed_default_workers() -> None:
     db = SessionLocal()
     try:
-        admin_user = db.query(User).filter(User.username == auth.DEFAULT_ADMIN_USERNAME).first()
-        admin_name = admin_user.name if admin_user and admin_user.name else auth.DEFAULT_ADMIN_NAME
+        users = db.query(User).filter(User.is_active.is_(True)).all()
+        for user in users:
+            worker = db.query(Worker).filter(Worker.user_id == user.id).first()
+            if not worker:
+                worker = db.query(Worker).filter(Worker.name == user.name).first()
 
-        admin_worker = db.query(Worker).filter(Worker.name == admin_name).first()
-        if admin_worker:
-            admin_worker.role = '\uC18C\uC7A5'
-            if not admin_worker.phone:
-                admin_worker.phone = '010-0000-0000'
-            if not admin_worker.status:
-                admin_worker.status = 'work'
-            db.commit()
-            return
+            worker_role = map_user_role_to_worker_role(user.role)
+            default_phone = '010-0000-0000' if user.username == auth.DEFAULT_ADMIN_USERNAME else None
 
-        db.add(
-            Worker(
-                name=admin_name,
-                role='\uC18C\uC7A5',
-                phone='010-0000-0000',
-                status='work',
+            if worker:
+                worker.user_id = user.id
+                worker.name = user.name
+                worker.role = worker_role
+                if default_phone and not worker.phone:
+                    worker.phone = default_phone
+                if not worker.status:
+                    worker.status = 'work'
+                continue
+
+            db.add(
+                Worker(
+                    user_id=user.id,
+                    name=user.name,
+                    role=worker_role,
+                    phone=default_phone,
+                    status='work',
+                )
             )
-        )
         db.commit()
     finally:
         db.close()
@@ -104,6 +126,8 @@ def patch_legacy_schema() -> None:
 
         if 'workers' in table_names:
             worker_columns = {column['name'] for column in inspector.get_columns('workers')}
+            if 'user_id' not in worker_columns:
+                conn.execute(text('ALTER TABLE workers ADD COLUMN user_id INTEGER NULL'))
             if 'heart_rate' not in worker_columns:
                 conn.execute(text('ALTER TABLE workers ADD COLUMN heart_rate INTEGER NULL'))
             if 'shift_started_at' not in worker_columns:
@@ -153,4 +177,3 @@ os.makedirs(uploads_dir, exist_ok=True)
 os.makedirs(os.path.join(uploads_dir, 'audio'), exist_ok=True)
 os.makedirs(os.path.join(uploads_dir, 'photos'), exist_ok=True)
 app.mount('/uploads', StaticFiles(directory=uploads_dir), name='uploads')
-

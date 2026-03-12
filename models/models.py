@@ -1,4 +1,4 @@
-﻿from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -9,6 +9,7 @@ class Worker(Base):
     __tablename__ = 'workers'
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
     name = Column(String(50), nullable=False)
     role = Column(String(50))
     phone = Column(String(20))
@@ -19,6 +20,7 @@ class Worker(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     zone = relationship('Zone', back_populates='workers')
+    user = relationship('User', back_populates='worker')
 
 
 class Zone(Base):
@@ -132,3 +134,5 @@ class User(Base):
     role = Column(String(50), nullable=False, default='site_manager')
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    worker = relationship('Worker', back_populates='user', uselist=False)
