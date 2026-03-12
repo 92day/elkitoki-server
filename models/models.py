@@ -56,6 +56,8 @@ class Alert(Base):
     level = Column(String(20))
     message = Column(Text)
     source = Column(String(50))
+    zone_id = Column(Integer, ForeignKey('zones.id'), nullable=True)
+    zone_name = Column(String(50), nullable=True)
     is_resolved = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -79,12 +81,25 @@ class Report(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     date = Column(String(20))
+    entry_type = Column(String(20), default='translation')
     text_content = Column(Text)
     translated_text = Column(Text)
     source_language = Column(String(10), default='ko')
     target_language = Column(String(10), nullable=True)
     author_name = Column(String(50))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class DailySummary(Base):
+    __tablename__ = 'daily_summaries'
+
+    id = Column(Integer, primary_key=True, index=True)
+    summary_date = Column(String(20), nullable=False, index=True)
+    summary_text = Column(Text, nullable=False)
+    source_count = Column(Integer, default=0)
+    model_name = Column(String(50), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
 
 
 class Progress(Base):

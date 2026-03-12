@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
 
 from database import SessionLocal, engine
-from models.models import Base, Zone
+from models.models import Base, Worker, Zone
 from routers import alerts, auth, photos, report, translations, weather, workers
 
 
@@ -35,6 +35,23 @@ def seed_default_zones() -> None:
         db.close()
 
 
+def seed_default_workers() -> None:
+    db = SessionLocal()
+    try:
+        if db.query(Worker.id).count() == 0:
+            db.add(
+                Worker(
+                    name='구이일',
+                    role='소장',
+                    phone='010-0000-0000',
+                    status='work',
+                )
+            )
+            db.commit()
+    finally:
+        db.close()
+
+
 def patch_legacy_schema() -> None:
     with engine.begin() as conn:
         inspector = inspect(conn)
@@ -45,6 +62,13 @@ def patch_legacy_schema() -> None:
             if 'risk_detected' not in photo_columns:
                 conn.execute(text('ALTER TABLE photos ADD COLUMN risk_detected BOOLEAN DEFAULT 0'))
 
+        if 'alerts' in table_names:
+            alert_columns = {column['name'] for column in inspector.get_columns('alerts')}
+            if 'zone_id' not in alert_columns:
+                conn.execute(text('ALTER TABLE alerts ADD COLUMN zone_id INTEGER NULL'))
+            if 'zone_name' not in alert_columns:
+                conn.execute(text('ALTER TABLE alerts ADD COLUMN zone_name VARCHAR(50) NULL'))
+
         if 'reports' in table_names:
             report_columns = {column['name'] for column in inspector.get_columns('reports')}
             if 'translated_text' not in report_columns:
@@ -53,6 +77,8 @@ def patch_legacy_schema() -> None:
                 conn.execute(text("ALTER TABLE reports ADD COLUMN source_language VARCHAR(10) DEFAULT 'ko'"))
             if 'target_language' not in report_columns:
                 conn.execute(text('ALTER TABLE reports ADD COLUMN target_language VARCHAR(10) NULL'))
+            if 'entry_type' not in report_columns:
+                conn.execute(text("ALTER TABLE reports ADD COLUMN entry_type VARCHAR(20) DEFAULT 'translation'"))
 
         if 'workers' in table_names:
             worker_columns = {column['name'] for column in inspector.get_columns('workers')}
@@ -67,6 +93,7 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     patch_legacy_schema()
     seed_default_zones()
+    seed_default_workers()
 
     if os.getenv('ENABLE_ARDUINO', '0') == '1':
         asyncio.create_task(alerts.read_arduino_serial())
@@ -74,7 +101,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title='Elkitoki Site API', version='2.4', lifespan=lifespan)
+app = FastAPI(title='Elkitoki Site API', version='2.5', lifespan=lifespan)
 
 
 @app.get('/health')
@@ -104,4 +131,3 @@ os.makedirs(uploads_dir, exist_ok=True)
 os.makedirs(os.path.join(uploads_dir, 'audio'), exist_ok=True)
 os.makedirs(os.path.join(uploads_dir, 'photos'), exist_ok=True)
 app.mount('/uploads', StaticFiles(directory=uploads_dir), name='uploads')
-

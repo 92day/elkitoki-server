@@ -2,7 +2,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -10,6 +10,15 @@ from database import get_db
 from models.models import Worker
 
 router = APIRouter(prefix='/api/workers', tags=['workers'])
+
+WORKER_ROLE_OPTIONS = [
+    '소장',
+    '안전관리자',
+    '현장관리자',
+    '관리자',
+    '현장직',
+    '기타',
+]
 
 
 class WorkerCreate(BaseModel):
@@ -21,6 +30,18 @@ class WorkerCreate(BaseModel):
     heart_rate: Optional[int] = None
     shift_started_at: Optional[datetime] = None
 
+    @field_validator('role', mode='before')
+    @classmethod
+    def validate_role(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        if cleaned not in WORKER_ROLE_OPTIONS:
+            raise ValueError('invalid worker role')
+        return cleaned
+
 
 class WorkerUpdate(BaseModel):
     role: Optional[str] = None
@@ -30,10 +51,27 @@ class WorkerUpdate(BaseModel):
     heart_rate: Optional[int] = None
     shift_started_at: Optional[datetime] = None
 
+    @field_validator('role', mode='before')
+    @classmethod
+    def validate_role(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        if cleaned not in WORKER_ROLE_OPTIONS:
+            raise ValueError('invalid worker role')
+        return cleaned
+
 
 class WorkerVitalsUpdate(BaseModel):
     heart_rate: Optional[int] = None
     shift_started_at: Optional[datetime] = None
+
+
+@router.get('/roles')
+def get_worker_roles():
+    return {'roles': WORKER_ROLE_OPTIONS}
 
 
 @router.get('/')
@@ -53,7 +91,7 @@ def get_worker(worker_id: int, db: Session = Depends(get_db)):
 def create_worker(data: WorkerCreate, db: Session = Depends(get_db)):
     payload = data.model_dump()
     if payload.get('status') == 'work' and not payload.get('shift_started_at'):
-      payload['shift_started_at'] = datetime.now(timezone.utc)
+        payload['shift_started_at'] = datetime.now(timezone.utc)
 
     worker = Worker(**payload)
     db.add(worker)

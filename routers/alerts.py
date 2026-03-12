@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import SessionLocal, get_db
-from models.models import Alert, SensorData
+from models.models import Alert, SensorData, Zone
 
 try:
     import serial
@@ -27,6 +27,19 @@ class AlertCreate(BaseModel):
     level: str
     message: str
     source: Optional[str] = 'Manual Input'
+    zone_id: Optional[int] = None
+    zone_name: Optional[str] = None
+
+
+def resolve_zone_name(db: Session, zone_id: Optional[int], zone_name: Optional[str]) -> tuple[Optional[int], Optional[str]]:
+    cleaned_name = zone_name.strip() if zone_name else None
+    if zone_id is None:
+        return None, cleaned_name or None
+
+    zone = db.query(Zone).filter(Zone.id == zone_id).first()
+    if not zone:
+        raise HTTPException(status_code=400, detail='Invalid zone_id. Check the zones table.')
+    return zone_id, zone.name
 
 
 @router.get('/')
@@ -36,7 +49,14 @@ def get_alerts(db: Session = Depends(get_db)):
 
 @router.post('/')
 def create_alert(data: AlertCreate, db: Session = Depends(get_db)):
-    alert = Alert(**data.model_dump())
+    zone_id, zone_name = resolve_zone_name(db, data.zone_id, data.zone_name)
+    alert = Alert(
+        level=data.level,
+        message=data.message,
+        source=data.source,
+        zone_id=zone_id,
+        zone_name=zone_name,
+    )
     db.add(alert)
     db.commit()
     db.refresh(alert)
@@ -111,8 +131,14 @@ async def read_arduino_serial():
 
                     db = SessionLocal()
                     try:
+                        zone_id = data.get('zone_id')
+                        zone_name = None
+                        if zone_id is not None:
+                            zone = db.query(Zone).filter(Zone.id == zone_id).first()
+                            zone_name = zone.name if zone else None
+
                         sensor_row = SensorData(
-                            zone_id=data.get('zone_id'),
+                            zone_id=zone_id,
                             sensor_type=data.get('type'),
                             value=data.get('value'),
                             unit=data.get('unit', ''),
@@ -121,7 +147,15 @@ async def read_arduino_serial():
 
                         alert_message = check_sensor_threshold(data)
                         if alert_message:
-                            db.add(Alert(level='high', message=alert_message, source='Sensor Auto Detection'))
+                            db.add(
+                                Alert(
+                                    level='high',
+                                    message=alert_message,
+                                    source='Sensor Auto Detection',
+                                    zone_id=zone_id,
+                                    zone_name=zone_name,
+                                )
+                            )
 
                         db.commit()
                     finally:
