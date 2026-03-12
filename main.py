@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import os
 from contextlib import asynccontextmanager
 
@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
 
 from database import SessionLocal, engine
-from models.models import Alert, Base, Photo, SensorData, Worker, Zone
+from models.models import Alert, Base, Photo, SensorData, User, Worker, Zone
 from routers import alerts, auth, photos, report, translations, weather, workers
 
 
@@ -48,16 +48,28 @@ def seed_default_zones() -> None:
 def seed_default_workers() -> None:
     db = SessionLocal()
     try:
-        if db.query(Worker.id).count() == 0:
-            db.add(
-                Worker(
-                    name='구이일',
-                    role='소장',
-                    phone='010-0000-0000',
-                    status='work',
-                )
-            )
+        admin_user = db.query(User).filter(User.username == auth.DEFAULT_ADMIN_USERNAME).first()
+        admin_name = admin_user.name if admin_user and admin_user.name else auth.DEFAULT_ADMIN_NAME
+
+        admin_worker = db.query(Worker).filter(Worker.name == admin_name).first()
+        if admin_worker:
+            admin_worker.role = '\uC18C\uC7A5'
+            if not admin_worker.phone:
+                admin_worker.phone = '010-0000-0000'
+            if not admin_worker.status:
+                admin_worker.status = 'work'
             db.commit()
+            return
+
+        db.add(
+            Worker(
+                name=admin_name,
+                role='\uC18C\uC7A5',
+                phone='010-0000-0000',
+                status='work',
+            )
+        )
+        db.commit()
     finally:
         db.close()
 
