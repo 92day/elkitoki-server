@@ -15,7 +15,6 @@ WORKER_ROLE_OPTIONS = [
     '소장',
     '안전관리자',
     '현장관리자',
-    '관리자',
     '현장직',
     '기타',
 ]
@@ -152,5 +151,6 @@ def delete_worker(worker_id: int, db: Session = Depends(get_db)):
     db.delete(worker)
     db.commit()
     return {'message': 'Deleted'}
+
 
 
