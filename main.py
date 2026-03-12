@@ -9,10 +9,11 @@ from sqlalchemy import inspect, text
 
 from database import SessionLocal, engine
 from models.models import Base, Zone
-from routers import alerts, photos, report, sensors, translations, weather, workers
+from routers import alerts, auth, photos, report, sensors, translations, weather, workers
 
 
 def seed_default_zones() -> None:
+    auth.seed_default_admin()
     db = SessionLocal()
     try:
         defaults = [
@@ -88,6 +89,7 @@ app.include_router(photos.router)
 app.include_router(report.router)
 app.include_router(translations.router)
 app.include_router(weather.router)
+app.include_router(auth.router)
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
 uploads_dir = os.path.join(base_dir, 'uploads')
