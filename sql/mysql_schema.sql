@@ -122,8 +122,6 @@ CREATE TABLE IF NOT EXISTS `workers` (
   `phone` VARCHAR(20) NULL,
   `zone_id` INT NULL,
   `status` VARCHAR(20) NULL DEFAULT 'work',
-  `heart_rate` INT NULL,
-  `shift_started_at` DATETIME NULL,
   `created_at` DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_workers_user_id` (`user_id`),
@@ -146,15 +144,3 @@ ON DUPLICATE KEY UPDATE
   `risk_level` = VALUES(`risk_level`),
   `max_workers` = VALUES(`max_workers`);
 
-INSERT INTO `workers` (`user_id`, `name`, `role`, `phone`, `status`)
-SELECT `users`.`id`, '구이일', '소장', '010-0000-0000', 'work'
-FROM `users`
-WHERE `users`.`username` = 'admin'
-  AND NOT EXISTS (
-    SELECT 1 FROM `workers` WHERE `workers`.`user_id` = `users`.`id`
-  )
-UNION ALL
-SELECT NULL, '구이일', '소장', '010-0000-0000', 'work'
-WHERE NOT EXISTS (
-  SELECT 1 FROM `workers` WHERE `name` = '구이일' AND `role` = '소장'
-);

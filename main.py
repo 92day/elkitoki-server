@@ -128,10 +128,6 @@ def patch_legacy_schema() -> None:
             worker_columns = {column['name'] for column in inspector.get_columns('workers')}
             if 'user_id' not in worker_columns:
                 conn.execute(text('ALTER TABLE workers ADD COLUMN user_id INTEGER NULL'))
-            if 'heart_rate' not in worker_columns:
-                conn.execute(text('ALTER TABLE workers ADD COLUMN heart_rate INTEGER NULL'))
-            if 'shift_started_at' not in worker_columns:
-                conn.execute(text('ALTER TABLE workers ADD COLUMN shift_started_at DATETIME NULL'))
 
 
 @asynccontextmanager
@@ -177,3 +173,4 @@ os.makedirs(uploads_dir, exist_ok=True)
 os.makedirs(os.path.join(uploads_dir, 'audio'), exist_ok=True)
 os.makedirs(os.path.join(uploads_dir, 'photos'), exist_ok=True)
 app.mount('/uploads', StaticFiles(directory=uploads_dir), name='uploads')
+
