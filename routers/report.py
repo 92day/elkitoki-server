@@ -52,6 +52,51 @@ class DailySummaryUpsert(BaseModel):
         return cleaned
 
 
+def _is_worker_call(report: Report) -> bool:
+    return (report.text_content or '').startswith('[작업자 호출]')
+
+
+def _build_today_summary(reports: list[Report]) -> tuple[str, int, str]:
+    total_count = len(reports)
+    translation_count = sum(1 for report in reports if report.entry_type == 'translation')
+    manual_count = sum(1 for report in reports if report.entry_type == 'manual' and not _is_worker_call(report))
+    worker_call_count = sum(1 for report in reports if _is_worker_call(report))
+
+    if total_count == 0:
+        return (
+            '오늘 저장된 소통 로그가 없습니다.\n\n기록이 생기면 이곳에서 요약을 생성할 수 있습니다.',
+            0,
+            'rule-based-summary',
+        )
+
+    content_lines = []
+    for report in reports:
+        text = (report.text_content or '').strip()
+        if not text:
+            continue
+        if _is_worker_call(report):
+            content_lines.append(text.replace('[작업자 호출] ', '').strip())
+        else:
+            content_lines.append(text)
+
+    unique_lines: list[str] = []
+    for text in content_lines:
+        if text not in unique_lines:
+            unique_lines.append(text)
+
+    highlights = unique_lines[:5]
+    highlight_block = '\n'.join(f'- {item}' for item in highlights) if highlights else '- 주요 소통 기록이 없습니다.'
+
+    summary_text = (
+        f'오늘 총 {total_count}건의 소통이 기록되었습니다.\n'
+        f'- 번역 기록 {translation_count}건\n'
+        f'- 수동 입력 {manual_count}건\n'
+        f'- 작업자 호출 {worker_call_count}건\n\n'
+        f'주요 내용\n{highlight_block}'
+    )
+    return summary_text, total_count, 'rule-based-summary'
+
+
 @router.get('/')
 def get_reports(db: Session = Depends(get_db)):
     return db.query(Report).order_by(Report.created_at.desc()).all()
@@ -97,6 +142,37 @@ def upsert_today_summary(data: DailySummaryUpsert, db: Session = Depends(get_db)
     summary.summary_text = data.summary_text
     summary.source_count = data.source_count
     summary.model_name = data.model_name.strip() if data.model_name else None
+
+    db.commit()
+    db.refresh(summary)
+    return summary
+
+
+@router.post('/summary/today/generate')
+def generate_today_summary(db: Session = Depends(get_db)):
+    today = str(date.today())
+    reports = (
+        db.query(Report)
+        .filter(Report.date == today)
+        .order_by(Report.created_at.asc())
+        .all()
+    )
+
+    summary_text, source_count, model_name = _build_today_summary(reports)
+    summary = (
+        db.query(DailySummary)
+        .filter(DailySummary.summary_date == today)
+        .order_by(DailySummary.updated_at.desc(), DailySummary.created_at.desc())
+        .first()
+    )
+
+    if summary is None:
+        summary = DailySummary(summary_date=today)
+        db.add(summary)
+
+    summary.summary_text = summary_text
+    summary.source_count = source_count
+    summary.model_name = model_name
 
     db.commit()
     db.refresh(summary)
