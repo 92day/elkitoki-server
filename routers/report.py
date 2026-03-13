@@ -1,4 +1,5 @@
-﻿from datetime import date
+﻿import os
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -6,6 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from database import get_db
+from gemini_client import analyze_text, is_gemini_configured
 from models.models import DailySummary, Report
 
 router = APIRouter(prefix='/api/reports', tags=['reports'])
@@ -56,7 +58,7 @@ def _is_worker_call(report: Report) -> bool:
     return (report.text_content or '').startswith('[작업자 호출]')
 
 
-def _build_today_summary(reports: list[Report]) -> tuple[str, int, str]:
+def _build_rule_based_summary(reports: list[Report]) -> tuple[str, int, str]:
     total_count = len(reports)
     translation_count = sum(1 for report in reports if report.entry_type == 'translation')
     manual_count = sum(1 for report in reports if report.entry_type == 'manual' and not _is_worker_call(report))
@@ -95,6 +97,53 @@ def _build_today_summary(reports: list[Report]) -> tuple[str, int, str]:
         f'주요 내용\n{highlight_block}'
     )
     return summary_text, total_count, 'rule-based-summary'
+
+
+def _build_gemini_prompt(reports: list[Report]) -> str:
+    lines: list[str] = []
+    for index, report in enumerate(reports, start=1):
+        text = (report.text_content or '').strip()
+        if not text:
+            continue
+        entry_label = '작업자 호출' if _is_worker_call(report) else ('번역 기록' if report.entry_type == 'translation' else '수동 입력')
+        created_at = report.created_at.isoformat() if report.created_at else ''
+        lines.append(f'{index}. [{entry_label}] [{created_at}] {text}')
+
+    joined_logs = '\n'.join(lines) if lines else '기록 없음'
+    return (
+        '당신은 건설 현장 관리자의 작업일지를 정리하는 한국어 비서입니다.\n'
+        '아래 오늘의 소통 로그를 읽고, 중복 없이 자연스럽고 간결한 한국어로 요약하세요.\n'
+        '반드시 다음 4개 제목으로만 작성하세요.\n'
+        '1. 오늘의 핵심 작업\n'
+        '2. 주요 지시 및 소통\n'
+        '3. 위험 및 주의 사항\n'
+        '4. 후속 조치\n\n'
+        '주의사항:\n'
+        '- 로그에 없는 내용은 추측하지 마세요.\n'
+        '- 너무 장황하지 않게 8~12문장 내로 정리하세요.\n'
+        '- 작업자 호출이 있으면 필요한 경우 주요 지시 및 소통 또는 후속 조치에 녹여 쓰세요.\n\n'
+        f'오늘의 소통 로그:\n{joined_logs}'
+    )
+
+
+def _preferred_gemini_model_name() -> str:
+    raw = (os.getenv('GEMINI_TEXT_MODELS') or '').strip()
+    if raw:
+        return raw.split(',')[0].strip() or 'gemini-text'
+    return 'gemini-2.5-flash'
+
+
+def _build_today_summary(reports: list[Report]) -> tuple[str, int, str]:
+    if not reports:
+        return _build_rule_based_summary(reports)
+
+    if is_gemini_configured():
+        prompt = _build_gemini_prompt(reports)
+        summary_text = analyze_text(prompt, max_output_tokens=900).strip()
+        if summary_text and not summary_text.startswith('AI analysis failed'):
+            return summary_text, len(reports), _preferred_gemini_model_name()
+
+    return _build_rule_based_summary(reports)
 
 
 @router.get('/')
