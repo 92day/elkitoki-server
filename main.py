@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import os
 from contextlib import asynccontextmanager
 
@@ -161,6 +161,7 @@ app.add_middleware(
 app.include_router(workers.router)
 app.include_router(alerts.router)
 app.include_router(alerts.sensor_router)
+app.include_router(alerts.device_router)
 app.include_router(photos.router)
 app.include_router(report.router)
 app.include_router(translations.router)
