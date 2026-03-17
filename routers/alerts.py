@@ -29,6 +29,8 @@ next_command_id = 1
 
 STATUS_EXCLUDE_KEYS = {'kind', 'device', 'timestamp'}
 ZONE_ID_BY_LABEL = {'A': 1, 'B': 2, 'C': 3}
+ZONE_SOUND_FIELDS = {1: 'soundA', 2: 'soundB', 3: 'soundC'}
+last_valid_zone_noise: dict[int, dict[str, Any]] = {}
 
 
 class AlertCreate(BaseModel):
@@ -79,6 +81,70 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+
+def coerce_noise_decibel(value: Any) -> Optional[int]:
+    if isinstance(value, bool) or value is None:
+        return None
+    if not isinstance(value, (int, float)):
+        return None
+
+    numeric = float(value)
+    if numeric <= 0:
+        return 35
+    if numeric <= 120:
+        return int(round(numeric))
+
+    scaled = 35 + (min(numeric, 1023.0) / 1023.0) * 60
+    return int(round(scaled))
+
+
+def classify_noise_status(decibel: Optional[int]) -> str:
+    if decibel is None:
+        return 'safe'
+    if decibel >= 80:
+        return 'danger'
+    if decibel >= 70:
+        return 'caution'
+    return 'safe'
+
+
+def format_peak_time(timestamp: Optional[str]) -> str:
+    if not timestamp:
+        return '--:--'
+    try:
+        parsed = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+        return parsed.astimezone().strftime('%H:%M')
+    except ValueError:
+        return '--:--'
+
+
+def build_zone_noise_payload() -> dict[str, dict[str, Any]]:
+    payload: dict[str, dict[str, Any]] = {}
+
+    for zone_id, field_name in ZONE_SOUND_FIELDS.items():
+        cached = latest_sensor_cache.get(field_name) or {}
+        decibel = coerce_noise_decibel(cached.get('value'))
+        updated_at = cached.get('updatedAt')
+
+        if decibel is not None:
+            last_valid_zone_noise[zone_id] = {
+                'decibel': decibel,
+                'peak': format_peak_time(updated_at),
+                'status': classify_noise_status(decibel),
+                'updatedAt': updated_at,
+            }
+
+        payload[str(zone_id)] = last_valid_zone_noise.get(
+            zone_id,
+            {
+                'decibel': 35,
+                'peak': '--:--',
+                'status': 'safe',
+                'updatedAt': None,
+            },
+        )
+
+    return payload
 def add_sensor_row(
     db: Session,
     *,
@@ -345,7 +411,10 @@ async def sensor_websocket_endpoint(websocket: WebSocket):
 
 @sensor_router.get('/latest')
 def get_latest_sensor_values():
-    return latest_sensor_cache
+    return {
+        **latest_sensor_cache,
+        'zoneNoiseById': build_zone_noise_payload(),
+    }
 
 
 @sensor_router.post('/events')
@@ -408,5 +477,7 @@ async def read_arduino_serial():
         except Exception as exc:
             print(f'[Arduino] Serial connection failed: {exc}. Retrying in 5 seconds.')
             await asyncio.sleep(5)
+
+
 
 
