@@ -63,9 +63,8 @@ def _resolve_report_collection(report) -> str:
 
 
 def sync_report_log(report) -> None:
-    collection_name = _resolve_report_collection(report)
     insert_document(
-        collection_name,
+        _resolve_report_collection(report),
         {
             'mysql_report_id': getattr(report, 'id', None),
             'date': getattr(report, 'date', None),
@@ -81,8 +80,7 @@ def sync_report_log(report) -> None:
 
 
 def delete_report_log(report) -> None:
-    collection_name = _resolve_report_collection(report)
-    delete_document(collection_name, 'mysql_report_id', getattr(report, 'id', None))
+    delete_document(_resolve_report_collection(report), 'mysql_report_id', getattr(report, 'id', None))
 
 
 def sync_alert_log(alert, event_type: str | None = None) -> None:
@@ -97,6 +95,35 @@ def sync_alert_log(alert, event_type: str | None = None) -> None:
             'zone_name': getattr(alert, 'zone_name', None),
             'event_type': event_type,
             'created_at': getattr(alert, 'created_at', None).isoformat() if getattr(alert, 'created_at', None) else _now_iso(),
+        },
+    )
+
+
+def sync_sensor_status_log(payload: dict[str, Any]) -> None:
+    timestamp = payload.get('timestamp') or _now_iso()
+    insert_document(
+        'sensor_status_logs',
+        {
+            'kind': payload.get('kind') or 'status',
+            'device': payload.get('device'),
+            'timestamp': timestamp,
+            'payload': payload,
+            'created_at': timestamp,
+        },
+    )
+
+
+def sync_sensor_event_log(payload: dict[str, Any]) -> None:
+    timestamp = payload.get('timestamp') or _now_iso()
+    insert_document(
+        'sensor_event_logs',
+        {
+            'kind': payload.get('kind') or 'event',
+            'device': payload.get('device'),
+            'event_type': payload.get('eventType'),
+            'timestamp': timestamp,
+            'payload': payload,
+            'created_at': timestamp,
         },
     )
 

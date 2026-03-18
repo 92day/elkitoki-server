@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from database import SessionLocal, get_db
 from models.models import Alert, Report, SensorData, Zone
-from mongo_store import sync_alert_log, sync_report_log
+from mongo_store import sync_alert_log, sync_report_log, sync_sensor_event_log, sync_sensor_status_log
 
 try:
     import serial
@@ -359,6 +359,11 @@ async def process_sensor_payload(payload: dict[str, Any]) -> None:
     payload.setdefault('timestamp', now_iso())
     update_latest_cache_from_payload(payload)
 
+    if payload.get('kind') == 'status':
+        sync_sensor_status_log(payload)
+    elif payload.get('kind') == 'event':
+        sync_sensor_event_log(payload)
+
     db = SessionLocal()
     try:
         persist_sensor_rows(db, payload)
@@ -494,6 +499,8 @@ async def read_arduino_serial():
         except Exception as exc:
             print(f'[Arduino] Serial connection failed: {exc}. Retrying in 5 seconds.')
             await asyncio.sleep(5)
+
+
 
 
 
