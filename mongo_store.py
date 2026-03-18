@@ -13,6 +13,7 @@ load_dotenv()
 
 _mongo_client = None
 _mongo_db = None
+ZONE_ID_BY_LABEL = {'A': 1, 'B': 2, 'C': 3}
 
 
 def _now_iso() -> str:
@@ -101,12 +102,18 @@ def sync_alert_log(alert, event_type: str | None = None) -> None:
 
 def sync_sensor_status_log(payload: dict[str, Any]) -> None:
     timestamp = payload.get('timestamp') or _now_iso()
+    zones = []
+    for zone_label in ('A', 'B', 'C'):
+        if f'sound{zone_label}' in payload:
+            zones.append(zone_label)
+
     insert_document(
         'sensor_status_logs',
         {
             'kind': payload.get('kind') or 'status',
             'device': payload.get('device'),
             'timestamp': timestamp,
+            'zones': zones,
             'payload': payload,
             'created_at': timestamp,
         },
@@ -115,6 +122,11 @@ def sync_sensor_status_log(payload: dict[str, Any]) -> None:
 
 def sync_sensor_event_log(payload: dict[str, Any]) -> None:
     timestamp = payload.get('timestamp') or _now_iso()
+    zone = (payload.get('zone') or '').strip().upper() or None
+    zone_id = payload.get('zone_id')
+    if zone_id is None and zone in ZONE_ID_BY_LABEL:
+        zone_id = ZONE_ID_BY_LABEL[zone]
+
     insert_document(
         'sensor_event_logs',
         {
@@ -122,6 +134,8 @@ def sync_sensor_event_log(payload: dict[str, Any]) -> None:
             'device': payload.get('device'),
             'event_type': payload.get('eventType'),
             'timestamp': timestamp,
+            'zone': zone,
+            'zone_id': zone_id,
             'payload': payload,
             'created_at': timestamp,
         },
@@ -179,3 +193,101 @@ def fetch_today_daily_log_entries(today_text: str) -> list[dict[str, Any]]:
 
     entries.sort(key=lambda item: item.get('created_at') or '')
     return entries
+
+
+def _build_sensor_log_filter(
+    *,
+    date_text: str | None = None,
+    device: str | None = None,
+    event_type: str | None = None,
+    zone: str | None = None,
+    is_event: bool = False,
+) -> dict[str, Any]:
+    query: dict[str, Any] = {}
+
+    if date_text:
+        query['created_at'] = {'$regex': f'^{date_text}'}
+    if device:
+        query['device'] = device
+    if is_event and event_type:
+        query['event_type'] = event_type
+    if zone:
+        normalized_zone = zone.strip().upper()
+        zone_id = ZONE_ID_BY_LABEL.get(normalized_zone)
+        if is_event:
+            zone_values = [normalized_zone]
+            if normalized_zone and not normalized_zone.endswith('구역'):
+                zone_values.append(f'{normalized_zone}구역')
+            or_clauses: list[dict[str, Any]] = [
+                {'zone': {'$in': zone_values}},
+                {'payload.zone': {'$in': zone_values}},
+            ]
+            if zone_id is not None:
+                or_clauses.append({'zone_id': zone_id})
+                or_clauses.append({'payload.zone_id': zone_id})
+            query['$or'] = or_clauses
+        else:
+            query['zones'] = normalized_zone
+
+    return query
+
+
+def _normalize_sensor_document(document: dict[str, Any], *, is_event: bool) -> dict[str, Any]:
+    mongo_id = str(document.get('_id'))
+    normalized = {
+        'id': mongo_id,
+        'mongo_id': mongo_id,
+        'kind': document.get('kind'),
+        'device': document.get('device'),
+        'timestamp': document.get('timestamp'),
+        'created_at': document.get('created_at') or _now_iso(),
+        'payload': document.get('payload') or {},
+    }
+    if is_event:
+        normalized['event_type'] = document.get('event_type')
+        normalized['zone'] = document.get('zone')
+        normalized['zone_id'] = document.get('zone_id')
+    else:
+        normalized['zones'] = document.get('zones') or []
+    return normalized
+
+
+def fetch_sensor_status_logs(
+    *,
+    date_text: str | None = None,
+    device: str | None = None,
+    zone: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    db = get_mongo_db()
+    if db is None:
+        return []
+
+    cursor = (
+        db['sensor_status_logs']
+        .find(_build_sensor_log_filter(date_text=date_text, device=device, zone=zone, is_event=False))
+        .sort('created_at', -1)
+        .limit(max(1, min(limit, 500)))
+    )
+    return [_normalize_sensor_document(document, is_event=False) for document in cursor]
+
+
+def fetch_sensor_event_logs(
+    *,
+    date_text: str | None = None,
+    device: str | None = None,
+    event_type: str | None = None,
+    zone: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    db = get_mongo_db()
+    if db is None:
+        return []
+
+    cursor = (
+        db['sensor_event_logs']
+        .find(_build_sensor_log_filter(date_text=date_text, device=device, event_type=event_type, zone=zone, is_event=True))
+        .sort('created_at', -1)
+        .limit(max(1, min(limit, 500)))
+    )
+    return [_normalize_sensor_document(document, is_event=True) for document in cursor]

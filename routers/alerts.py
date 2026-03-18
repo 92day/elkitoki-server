@@ -5,13 +5,13 @@ from datetime import date, datetime, timezone
 from typing import Any, Optional
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, Body, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import SessionLocal, get_db
 from models.models import Alert, Report, SensorData, Zone
-from mongo_store import sync_alert_log, sync_report_log, sync_sensor_event_log, sync_sensor_status_log
+from mongo_store import fetch_sensor_event_logs, fetch_sensor_status_logs, sync_alert_log, sync_report_log, sync_sensor_event_log, sync_sensor_status_log
 
 try:
     import serial
@@ -439,6 +439,32 @@ def get_latest_sensor_values():
     }
 
 
+@sensor_router.get('/logs/status')
+def get_sensor_status_log_entries(
+    date_text: Optional[str] = Query(default=None, alias='date'),
+    device: Optional[str] = None,
+    zone: Optional[str] = None,
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    return fetch_sensor_status_logs(date_text=date_text, device=device, zone=zone, limit=limit)
+
+
+@sensor_router.get('/logs/events')
+def get_sensor_event_log_entries(
+    date_text: Optional[str] = Query(default=None, alias='date'),
+    device: Optional[str] = None,
+    event_type: Optional[str] = None,
+    zone: Optional[str] = None,
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    return fetch_sensor_event_logs(
+        date_text=date_text,
+        device=device,
+        event_type=event_type,
+        zone=zone,
+        limit=limit,
+    )
+
 @sensor_router.post('/events')
 async def receive_sensor_event(payload: dict[str, Any] = Body(...)):
     await process_sensor_payload(payload)
@@ -499,6 +525,7 @@ async def read_arduino_serial():
         except Exception as exc:
             print(f'[Arduino] Serial connection failed: {exc}. Retrying in 5 seconds.')
             await asyncio.sleep(5)
+
 
 
 
