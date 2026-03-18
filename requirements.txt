@@ -10,3 +10,5 @@ python-multipart==0.0.9
 openai==1.14.3
 aiofiles==23.2.1
 deep-translator==1.11.4
+pymongo==4.11.1
+

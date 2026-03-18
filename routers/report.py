@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from gemini_client import analyze_text, is_gemini_configured
 from models.models import DailySummary, Report
+from mongo_store import delete_report_log, fetch_today_daily_log_entries, sync_report_log
 
 router = APIRouter(prefix='/api/reports', tags=['reports'])
 
@@ -242,6 +243,7 @@ def create_report(data: ReportCreate, db: Session = Depends(get_db)):
     db.add(report)
     db.commit()
     db.refresh(report)
+    sync_report_log(report)
     return report
 
 
@@ -251,6 +253,136 @@ def delete_report(report_id: int, db: Session = Depends(get_db)):
     if not report:
         raise HTTPException(status_code=404, detail='Report not found.')
 
+    delete_report_log(report)
     db.delete(report)
     db.commit()
     return {'ok': True}
+
+
+
+def _entry_label(entry: dict) -> str:
+    log_type = entry.get('log_type')
+    if log_type == 'worker_call':
+        return '작업자 호출'
+    if log_type == 'alert':
+        return '안전 알림'
+    if log_type == 'translation':
+        return '번역 기록'
+    return '수동 입력'
+
+
+def _build_rule_based_summary_from_entries(entries: list[dict]) -> tuple[str, int, str]:
+    total_count = len(entries)
+    translation_count = sum(1 for entry in entries if entry.get('log_type') == 'translation')
+    manual_count = sum(1 for entry in entries if entry.get('log_type') == 'manual')
+    worker_call_count = sum(1 for entry in entries if entry.get('log_type') == 'worker_call')
+    alert_count = sum(1 for entry in entries if entry.get('log_type') == 'alert')
+
+    if total_count == 0:
+        return (
+            '오늘 저장된 소통 로그가 없습니다.\n\n기록이 생기면 이곳에서 요약을 생성할 수 있습니다.',
+            0,
+            'rule-based-summary',
+        )
+
+    unique_lines: list[str] = []
+    for entry in entries:
+        text = (entry.get('text_content') or '').strip()
+        if text and text not in unique_lines:
+            unique_lines.append(text)
+
+    highlights = unique_lines[:6]
+    highlight_block = '\n'.join(f'- {item}' for item in highlights) if highlights else '- 주요 소통 기록이 없습니다.'
+
+    summary_text = (
+        f'오늘 총 {total_count}건의 기록이 저장되었습니다.\n'
+        f'- 번역 기록 {translation_count}건\n'
+        f'- 수동 입력 {manual_count}건\n'
+        f'- 작업자 호출 {worker_call_count}건\n'
+        f'- 안전 알림 {alert_count}건\n\n'
+        f'주요 내용\n{highlight_block}'
+    )
+    return summary_text, total_count, 'rule-based-summary'
+
+
+def _build_gemini_prompt_from_entries(entries: list[dict]) -> str:
+    lines: list[str] = []
+    for index, entry in enumerate(entries, start=1):
+        text = (entry.get('text_content') or '').strip()
+        if not text:
+            continue
+        entry_label = _entry_label(entry)
+        created_at = entry.get('created_at') or ''
+        lines.append(f'{index}. [{entry_label}] [{created_at}] {text}')
+
+    joined_logs = '\n'.join(lines) if lines else '기록 없음'
+    return (
+        '당신은 건설 현장 관리자의 작업일지를 정리하는 한국어 비서입니다.\n'
+        '아래 오늘의 소통 로그와 안전 알림 로그를 읽고, 중복 없이 자연스럽고 간결한 한국어로 요약하세요.\n'
+        '반드시 다음 4개 제목으로만 작성하세요.\n'
+        '1. 오늘의 핵심 작업\n'
+        '2. 주요 지시 및 소통\n'
+        '3. 위험 및 주의 사항\n'
+        '4. 후속 조치\n\n'
+        '주의사항:\n'
+        '- 로그에 없는 내용은 추측하지 마세요.\n'
+        '- 너무 장황하지 않게 8~12문장 내로 정리하세요.\n'
+        '- 작업자 호출과 안전 알림이 있으면 필요한 경우 주요 지시 및 소통 또는 위험 및 주의 사항에 반영하세요.\n\n'
+        f'오늘의 로그:\n{joined_logs}'
+    )
+
+
+def _build_today_summary_from_entries(entries: list[dict]) -> tuple[str, int, str]:
+    if not entries:
+        return _build_rule_based_summary_from_entries(entries)
+
+    if is_gemini_configured():
+        prompt = _build_gemini_prompt_from_entries(entries)
+        summary_text = analyze_text(prompt, max_output_tokens=900).strip()
+        if summary_text and not summary_text.startswith('AI analysis failed'):
+            return summary_text, len(entries), _preferred_gemini_model_name()
+
+    return _build_rule_based_summary_from_entries(entries)
+
+@router.get('/daily-log/today')
+def get_today_daily_log_entries():
+    today = str(date.today())
+    return fetch_today_daily_log_entries(today)
+
+
+@router.get('/daily-log/summary/today')
+def get_today_daily_log_summary(db: Session = Depends(get_db)):
+    today = str(date.today())
+    summary = (
+        db.query(DailySummary)
+        .filter(DailySummary.summary_date == today)
+        .order_by(DailySummary.updated_at.desc(), DailySummary.created_at.desc())
+        .first()
+    )
+    return summary
+
+
+@router.post('/daily-log/summary/today/generate')
+def generate_today_daily_log_summary(db: Session = Depends(get_db)):
+    today = str(date.today())
+    entries = fetch_today_daily_log_entries(today)
+    summary_text, source_count, model_name = _build_today_summary_from_entries(entries)
+
+    summary = (
+        db.query(DailySummary)
+        .filter(DailySummary.summary_date == today)
+        .order_by(DailySummary.updated_at.desc(), DailySummary.created_at.desc())
+        .first()
+    )
+
+    if summary is None:
+        summary = DailySummary(summary_date=today)
+        db.add(summary)
+
+    summary.summary_text = summary_text
+    summary.source_count = source_count
+    summary.model_name = model_name
+
+    db.commit()
+    db.refresh(summary)
+    return summary
