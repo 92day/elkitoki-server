@@ -1,5 +1,5 @@
 ﻿import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from dotenv import load_dotenv
@@ -167,11 +167,46 @@ def _find_today_documents(collection_name: str, today_text: str) -> list[dict[st
     if db is None:
         return []
 
-    return list(
+    try:
+        today_date = datetime.strptime(today_text, '%Y-%m-%d').date()
+        previous_date_text = (today_date - timedelta(days=1)).isoformat()
+    except ValueError:
+        previous_date_text = today_text
+
+    documents = list(
         db[collection_name]
-        .find({'created_at': {'$regex': f'^{today_text}'}})
+        .find(
+            {
+                '$or': [
+                    {'date': today_text},
+                    {'created_at': {'$regex': f'^{today_text}'}},
+                    {'created_at': {'$regex': f'^{previous_date_text}'}},
+                ]
+            }
+        )
         .sort('created_at', 1)
     )
+
+    filtered: list[dict[str, Any]] = []
+    for document in documents:
+        if str(document.get('date') or '').strip() == today_text:
+            filtered.append(document)
+            continue
+
+        created_at = str(document.get('created_at') or '').strip()
+        if not created_at:
+            continue
+
+        try:
+            parsed = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+            local_date = parsed.astimezone().date().isoformat()
+            if local_date == today_text:
+                filtered.append(document)
+        except ValueError:
+            if created_at.startswith(today_text):
+                filtered.append(document)
+
+    return filtered
 
 
 def fetch_translation_history(limit: int = 20) -> list[dict[str, Any]]:
@@ -220,8 +255,17 @@ def fetch_today_daily_log_entries(today_text: str) -> list[dict[str, Any]]:
     for collection_name, log_type in mappings:
         for document in _find_today_documents(collection_name, today_text):
             mongo_id = str(document.get('_id'))
-            text_content = document.get('text_content') or document.get('message') or ''
-            author_name = document.get('author_name') or document.get('source') or '시스템'
+            text_content = (
+                document.get('text_content')
+                or document.get('source_text')
+                or document.get('message')
+                or ''
+            )
+            author_name = (
+                document.get('author_name')
+                or document.get('source')
+                or ('번역기' if log_type == 'translation' else '시스템')
+            )
             mysql_report_id = document.get('mysql_report_id')
 
             entries.append(
