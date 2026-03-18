@@ -298,7 +298,7 @@ def build_alert_from_payload(payload: dict[str, Any], db: Session) -> Optional[A
     if event_type == 'fall_detected':
         return Alert(
             level='high',
-            message='낙상(기울기) 감지',
+            message='작업자 낙상 감지!',
             source='Nano Tilt',
             zone_id=zone_id,
             zone_name=resolved_zone_name,
@@ -486,4 +486,5 @@ async def read_arduino_serial():
         except Exception as exc:
             print(f'[Arduino] Serial connection failed: {exc}. Retrying in 5 seconds.')
             await asyncio.sleep(5)
+
 
