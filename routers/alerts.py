@@ -96,7 +96,8 @@ def coerce_noise_score(value: Any) -> Optional[int]:
     if numeric <= 120:
         return max(30, int(round(numeric)))
 
-    scaled = 30 + (min(numeric, 1023.0) / 1023.0) * 70
+    raw_score = 1 + (min(numeric, 1023.0) / 1023.0) ** 0.58 * 69
+    scaled = 30 + raw_score
     return int(round(scaled))
 
 
@@ -515,6 +516,7 @@ async def read_arduino_serial():
         except Exception as exc:
             print(f'[Arduino] Serial connection failed: {exc}. Retrying in 5 seconds.')
             await asyncio.sleep(5)
+
 
 
 
