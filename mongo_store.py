@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from bson import ObjectId
 from dotenv import load_dotenv
 
 try:
@@ -14,6 +15,8 @@ load_dotenv()
 _mongo_client = None
 _mongo_db = None
 ZONE_ID_BY_LABEL = {'A': 1, 'B': 2, 'C': 3}
+DAILY_LOG_COLLECTIONS = ('translation_logs', 'worker_call_logs', 'manual_logs', 'alert_logs')
+REPORT_LOG_COLLECTIONS = ('translation_logs', 'worker_call_logs', 'manual_logs')
 
 
 def _now_iso() -> str:
@@ -38,11 +41,11 @@ def get_mongo_db():
     return _mongo_db
 
 
-def insert_document(collection_name: str, document: dict[str, Any]) -> None:
+def insert_document(collection_name: str, document: dict[str, Any]):
     db = get_mongo_db()
     if db is None:
-        return
-    db[collection_name].insert_one(document)
+        return None
+    return db[collection_name].insert_one(document)
 
 
 def delete_document(collection_name: str, field_name: str, field_value: Any) -> None:
@@ -52,15 +55,120 @@ def delete_document(collection_name: str, field_name: str, field_value: Any) -> 
     db[collection_name].delete_one({field_name: field_value})
 
 
-def _resolve_report_collection(report) -> str:
-    text = (getattr(report, 'text_content', '') or '').strip()
-    entry_type = (getattr(report, 'entry_type', '') or '').strip()
+def delete_document_by_id(collection_name: str, mongo_id: str) -> None:
+    db = get_mongo_db()
+    if db is None:
+        return
+    db[collection_name].delete_one({'_id': ObjectId(mongo_id)})
+
+
+def _resolve_report_collection_by_values(*, entry_type: str, text_content: str) -> str:
+    text = (text_content or '').strip()
+    normalized_entry_type = (entry_type or '').strip().lower()
 
     if text.startswith('[작업자 호출]') or text.startswith('[작업자 요청]'):
         return 'worker_call_logs'
-    if entry_type == 'translation':
+    if normalized_entry_type == 'translation':
         return 'translation_logs'
     return 'manual_logs'
+
+
+def _resolve_report_collection(report) -> str:
+    return _resolve_report_collection_by_values(
+        entry_type=getattr(report, 'entry_type', '') or '',
+        text_content=getattr(report, 'text_content', '') or '',
+    )
+
+
+def _normalize_report_document(collection_name: str, document: dict[str, Any]) -> dict[str, Any]:
+    mongo_id = str(document.get('_id'))
+    if collection_name == 'translation_logs':
+        text_content = document.get('source_text') or document.get('text_content') or ''
+        translated_text = document.get('translated_text') or ''
+        entry_type = 'translation'
+    else:
+        text_content = document.get('text_content') or document.get('message') or ''
+        translated_text = document.get('translated_text') or None
+        entry_type = document.get('entry_type') or 'manual'
+
+    author_name = (
+        document.get('author_name')
+        or document.get('source')
+        or ('번역기' if collection_name == 'translation_logs' else '시스템')
+    )
+
+    return {
+        'id': f'{collection_name}:{mongo_id}',
+        'mongo_id': mongo_id,
+        'collection_name': collection_name,
+        'date': document.get('date'),
+        'entry_type': entry_type,
+        'text_content': text_content,
+        'translated_text': translated_text,
+        'source_language': document.get('source_language') or 'ko',
+        'target_language': document.get('target_language') or 'ko',
+        'author_name': author_name,
+        'created_at': document.get('created_at') or _now_iso(),
+    }
+
+
+def insert_report_entry(
+    *,
+    entry_type: str,
+    text_content: str,
+    translated_text: str | None = None,
+    source_language: str = 'ko',
+    target_language: str = 'ko',
+    author_name: str = 'Site Manager',
+    created_at: str | None = None,
+    date_text: str | None = None,
+    source: str | None = None,
+) -> dict[str, Any]:
+    timestamp = created_at or _now_iso()
+    today_text = date_text or timestamp[:10]
+    collection_name = _resolve_report_collection_by_values(entry_type=entry_type, text_content=text_content)
+
+    document: dict[str, Any] = {
+        'date': today_text,
+        'entry_type': entry_type,
+        'text_content': text_content,
+        'translated_text': translated_text or None,
+        'source_language': source_language,
+        'target_language': target_language,
+        'author_name': author_name,
+        'created_at': timestamp,
+    }
+
+    if collection_name == 'translation_logs':
+        document['source_text'] = text_content
+    if source:
+        document['source'] = source
+
+    result = insert_document(collection_name, document)
+    if result is not None:
+        document['_id'] = result.inserted_id
+    else:
+        document['_id'] = ObjectId()
+
+    return _normalize_report_document(collection_name, document)
+
+
+def insert_worker_request_log(
+    *,
+    worker: str | None,
+    source: str,
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    worker_label = f'작업자 {worker}' if worker in {'A', 'B'} else '작업자'
+    return insert_report_entry(
+        entry_type='manual',
+        text_content=f'[작업자 요청] {worker_label} 요청',
+        source_language='ko',
+        target_language='ko',
+        author_name='현장 버튼',
+        source=source,
+        created_at=created_at,
+    )
 
 
 def sync_report_log(report) -> None:
@@ -184,7 +292,7 @@ def _find_today_documents(collection_name: str, today_text: str) -> list[dict[st
                 ]
             }
         )
-        .sort('created_at', 1)
+        .sort('created_at', -1)
     )
 
     filtered: list[dict[str, Any]] = []
@@ -243,7 +351,22 @@ def fetch_translation_history(limit: int = 20) -> list[dict[str, Any]]:
     return rows
 
 
+def _parse_created_at(value: Any) -> datetime:
+    created_at = str(value or '').strip()
+    if not created_at:
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+    try:
+        parsed = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
 def fetch_today_daily_log_entries(today_text: str) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
     mappings = [
         ('translation_logs', 'translation'),
         ('worker_call_logs', 'worker_call'),
@@ -251,7 +374,6 @@ def fetch_today_daily_log_entries(today_text: str) -> list[dict[str, Any]]:
         ('alert_logs', 'alert'),
     ]
 
-    entries: list[dict[str, Any]] = []
     for collection_name, log_type in mappings:
         for document in _find_today_documents(collection_name, today_text):
             mongo_id = str(document.get('_id'))
@@ -268,6 +390,7 @@ def fetch_today_daily_log_entries(today_text: str) -> list[dict[str, Any]]:
             )
             mysql_report_id = document.get('mysql_report_id')
 
+            created_at = document.get('created_at') or _now_iso()
             entries.append(
                 {
                     'id': f'{collection_name}:{mongo_id}',
@@ -280,17 +403,39 @@ def fetch_today_daily_log_entries(today_text: str) -> list[dict[str, Any]]:
                     'author_name': author_name,
                     'source_language': document.get('source_language') or 'ko',
                     'target_language': document.get('target_language') or 'ko',
-                    'created_at': document.get('created_at') or _now_iso(),
+                    'created_at': created_at,
                     'mysql_report_id': mysql_report_id,
-                    'deletable': mysql_report_id is not None,
+                    'deletable': True,
                     'level': document.get('level'),
                     'zone_id': document.get('zone_id'),
                     'zone_name': document.get('zone_name'),
+                    'event_type': document.get('event_type'),
                 }
             )
 
-    entries.sort(key=lambda item: item.get('created_at') or '')
+    entries.sort(key=lambda item: _parse_created_at(item.get('created_at')), reverse=True)
     return entries
+
+
+def fetch_today_report_entries(today_text: str) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+
+    for collection_name in REPORT_LOG_COLLECTIONS:
+        for document in _find_today_documents(collection_name, today_text):
+            entries.append(_normalize_report_document(collection_name, document))
+
+    entries.sort(key=lambda item: _parse_created_at(item.get('created_at')), reverse=True)
+    return entries
+
+
+def clear_today_daily_log_entries(today_text: str) -> None:
+    db = get_mongo_db()
+    if db is None:
+        return
+
+    for collection_name in DAILY_LOG_COLLECTIONS:
+        for document in _find_today_documents(collection_name, today_text):
+            db[collection_name].delete_one({'_id': document.get('_id')})
 
 
 def _build_sensor_log_filter(
@@ -389,3 +534,4 @@ def fetch_sensor_event_logs(
         .limit(max(1, min(limit, 500)))
     )
     return [_normalize_sensor_document(document, is_event=True) for document in cursor]
+
