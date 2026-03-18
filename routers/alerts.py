@@ -27,6 +27,7 @@ connected_sensor_clients: list[WebSocket] = []
 latest_sensor_cache: dict[str, dict[str, Any]] = {}
 device_command_queue: list[dict[str, Any]] = []
 next_command_id = 1
+SENSOR_MYSQL_LOGGING_ENABLED = os.getenv('ENABLE_SENSORDATA_MYSQL', '0').strip().lower() in {'1', 'true', 'yes', 'on'}
 
 STATUS_EXCLUDE_KEYS = {'kind', 'device', 'timestamp'}
 ZONE_ID_BY_LABEL = {'A': 1, 'B': 2, 'C': 3}
@@ -366,7 +367,8 @@ async def process_sensor_payload(payload: dict[str, Any]) -> None:
 
     db = SessionLocal()
     try:
-        persist_sensor_rows(db, payload)
+        if SENSOR_MYSQL_LOGGING_ENABLED:
+            persist_sensor_rows(db, payload)
         alert = build_alert_from_payload(payload, db)
         if alert:
             db.add(alert)
@@ -525,6 +527,7 @@ async def read_arduino_serial():
         except Exception as exc:
             print(f'[Arduino] Serial connection failed: {exc}. Retrying in 5 seconds.')
             await asyncio.sleep(5)
+
 
 
 

@@ -2,13 +2,10 @@
 from typing import List
 
 from deep_translator import GoogleTranslator, MyMemoryTranslator
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
 
-from database import get_db
-from models.models import TranslationLog
+from mongo_store import fetch_translation_history, insert_translation_request_log
 
 router = APIRouter(prefix='/api', tags=['translations'])
 
@@ -58,7 +55,7 @@ class TranslateResponse(BaseModel):
 
 
 class TranslationHistoryItem(BaseModel):
-    id: int
+    id: str
     source_text: str
     translated_text: str
     source_language: str
@@ -102,7 +99,7 @@ def translate_with_fallbacks(text: str, source_language: str, target_language: s
 
 
 @router.post('/translate', response_model=TranslateResponse)
-def translate(payload: TranslateRequest, db: Session = Depends(get_db)):
+def translate(payload: TranslateRequest):
     try:
         translated_text = translate_with_fallbacks(
             text=payload.text,
@@ -112,20 +109,12 @@ def translate(payload: TranslateRequest, db: Session = Depends(get_db)):
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f'translation provider error: {exc}') from exc
 
-    log = TranslationLog(
+    insert_translation_request_log(
         source_text=payload.text,
         translated_text=translated_text,
         source_language=payload.source_language,
         target_language=payload.target_language,
     )
-
-    try:
-        db.add(log)
-        db.commit()
-        db.refresh(log)
-    except SQLAlchemyError as exc:
-        db.rollback()
-        raise HTTPException(status_code=500, detail='failed to store translation log') from exc
 
     return TranslateResponse(
         translated_text=translated_text,
@@ -135,28 +124,6 @@ def translate(payload: TranslateRequest, db: Session = Depends(get_db)):
 
 
 @router.get('/translations', response_model=List[TranslationHistoryItem])
-def get_translations(
-    limit: int = Query(default=20, ge=1, le=100),
-    db: Session = Depends(get_db),
-):
-    rows = (
-        db.query(TranslationLog)
-        .order_by(TranslationLog.created_at.desc())
-        .limit(limit)
-        .all()
-    )
-
-    return [
-        TranslationHistoryItem(
-            id=row.id,
-            source_text=row.source_text,
-            translated_text=row.translated_text,
-            source_language=row.source_language,
-            target_language=row.target_language,
-            created_at=row.created_at,
-        )
-        for row in rows
-    ]
-
-
-
+def get_translations(limit: int = Query(default=20, ge=1, le=100)):
+    rows = fetch_translation_history(limit=limit)
+    return [TranslationHistoryItem(**row) for row in rows]
