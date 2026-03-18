@@ -44,6 +44,15 @@ def _extract_text(payload: dict[str, Any]) -> str:
     return '\n'.join(texts).strip()
 
 
+def _extract_finish_reason(payload: dict[str, Any]) -> str | None:
+    candidates = payload.get('candidates') or []
+    for candidate in candidates:
+        finish_reason = candidate.get('finishReason')
+        if finish_reason:
+            return str(finish_reason)
+    return None
+
+
 def _extract_error_message(payload: dict[str, Any]) -> str:
     err = payload.get('error')
     if isinstance(err, dict):
@@ -99,7 +108,7 @@ def _generate_content(
         raise RuntimeError(f'Gemini request failed: {exc}') from exc
 
 
-def analyze_text(prompt: str, max_output_tokens: int = 800) -> str:
+def analyze_text_with_meta(prompt: str, max_output_tokens: int = 800) -> dict[str, Any]:
     errors: list[str] = []
     for model in _get_models('GEMINI_TEXT_MODELS', DEFAULT_TEXT_MODELS):
         try:
@@ -110,12 +119,30 @@ def analyze_text(prompt: str, max_output_tokens: int = 800) -> str:
                 temperature=0.2,
             )
             text = _extract_text(payload)
+            finish_reason = _extract_finish_reason(payload)
             if text:
-                return text
+                return {
+                    'text': text,
+                    'finish_reason': finish_reason,
+                    'model_name': model,
+                    'error': None,
+                }
             errors.append(f'{model}: empty response')
         except Exception as exc:
             errors.append(f'{model}: {exc}')
-    return 'AI analysis failed (Gemini): ' + ' | '.join(errors)
+    return {
+        'text': '',
+        'finish_reason': None,
+        'model_name': None,
+        'error': 'AI analysis failed (Gemini): ' + ' | '.join(errors),
+    }
+
+
+def analyze_text(prompt: str, max_output_tokens: int = 800) -> str:
+    result = analyze_text_with_meta(prompt, max_output_tokens=max_output_tokens)
+    if result['text']:
+        return str(result['text'])
+    return str(result['error'])
 
 
 def analyze_image(prompt: str, image_bytes: bytes, mime_type: str, max_output_tokens: int = 500) -> str:
