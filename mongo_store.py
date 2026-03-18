@@ -84,6 +84,26 @@ def delete_report_log(report) -> None:
     delete_document(_resolve_report_collection(report), 'mysql_report_id', getattr(report, 'id', None))
 
 
+def insert_translation_request_log(
+    *,
+    source_text: str,
+    translated_text: str,
+    source_language: str,
+    target_language: str,
+) -> None:
+    insert_document(
+        'translation_logs',
+        {
+            'source_text': source_text,
+            'translated_text': translated_text,
+            'source_language': source_language,
+            'target_language': target_language,
+            'log_origin': 'translation_request',
+            'created_at': _now_iso(),
+        },
+    )
+
+
 def sync_alert_log(alert, event_type: str | None = None) -> None:
     insert_document(
         'alert_logs',
@@ -152,6 +172,40 @@ def _find_today_documents(collection_name: str, today_text: str) -> list[dict[st
         .find({'created_at': {'$regex': f'^{today_text}'}})
         .sort('created_at', 1)
     )
+
+
+def fetch_translation_history(limit: int = 20) -> list[dict[str, Any]]:
+    db = get_mongo_db()
+    if db is None:
+        return []
+
+    cursor = (
+        db['translation_logs']
+        .find(
+            {
+                '$or': [
+                    {'source_text': {'$exists': True}},
+                    {'text_content': {'$exists': True}},
+                ]
+            }
+        )
+        .sort('created_at', -1)
+        .limit(max(1, min(limit, 100)))
+    )
+
+    rows: list[dict[str, Any]] = []
+    for document in cursor:
+        rows.append(
+            {
+                'id': str(document.get('_id')),
+                'source_text': document.get('source_text') or document.get('text_content') or '',
+                'translated_text': document.get('translated_text') or '',
+                'source_language': document.get('source_language') or 'ko',
+                'target_language': document.get('target_language') or 'ko',
+                'created_at': document.get('created_at') or _now_iso(),
+            }
+        )
+    return rows
 
 
 def fetch_today_daily_log_entries(today_text: str) -> list[dict[str, Any]]:
