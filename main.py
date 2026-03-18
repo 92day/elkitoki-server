@@ -1,4 +1,5 @@
 ﻿import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -10,6 +11,15 @@ from sqlalchemy import inspect, text
 from database import SessionLocal, engine
 from models.models import Alert, Base, Photo, SensorData, User, Worker, Zone
 from routers import alerts, auth, photos, report, translations, weather, workers
+
+class QuietSensorAccessFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        noisy_paths = ('/api/sensors/events', '/api/device/commands/pending')
+        return not any(path in message for path in noisy_paths)
+
+logging.getLogger('uvicorn.access').addFilter(QuietSensorAccessFilter())
+
 
 
 def map_user_role_to_worker_role(user_role: str | None) -> str:
