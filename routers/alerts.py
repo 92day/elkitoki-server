@@ -92,11 +92,11 @@ def coerce_noise_score(value: Any) -> Optional[int]:
 
     numeric = float(value)
     if numeric <= 0:
-        return 35
+        return 30
     if numeric <= 120:
-        return int(round(numeric))
+        return max(30, int(round(numeric)))
 
-    scaled = 35 + (min(numeric, 1023.0) / 1023.0) * 60
+    scaled = 30 + (min(numeric, 1023.0) / 1023.0) * 70
     return int(round(scaled))
 
 
@@ -147,7 +147,7 @@ def build_zone_noise_payload() -> dict[str, dict[str, Any]]:
                 fallback = None
 
         payload[str(zone_id)] = fallback or {
-            'score': 1,
+            'score': 30,
             'peak': '--:--',
             'status': 'safe',
             'updatedAt': None,
@@ -515,6 +515,7 @@ async def read_arduino_serial():
         except Exception as exc:
             print(f'[Arduino] Serial connection failed: {exc}. Retrying in 5 seconds.')
             await asyncio.sleep(5)
+
 
 
 
