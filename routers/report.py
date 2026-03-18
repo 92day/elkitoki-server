@@ -8,8 +8,15 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from gemini_client import analyze_text, is_gemini_configured
-from models.models import DailySummary, Report
-from mongo_store import delete_report_log, fetch_today_daily_log_entries, sync_report_log
+from models.models import DailySummary
+from mongo_store import (
+    DAILY_LOG_COLLECTIONS,
+    clear_today_daily_log_entries,
+    delete_document_by_id,
+    fetch_today_daily_log_entries,
+    fetch_today_report_entries,
+    insert_report_entry,
+)
 
 router = APIRouter(prefix='/api/reports', tags=['reports'])
 
@@ -55,15 +62,15 @@ class DailySummaryUpsert(BaseModel):
         return cleaned
 
 
-def _is_worker_call(report: Report) -> bool:
-    return (report.text_content or '').startswith('[작업자 호출]')
+def _is_worker_call(entry: dict) -> bool:
+    return (entry.get('text_content') or '').startswith('[작업자 호출]') or (entry.get('text_content') or '').startswith('[작업자 요청]')
 
 
-def _build_rule_based_summary(reports: list[Report]) -> tuple[str, int, str]:
-    total_count = len(reports)
-    translation_count = sum(1 for report in reports if report.entry_type == 'translation')
-    manual_count = sum(1 for report in reports if report.entry_type == 'manual' and not _is_worker_call(report))
-    worker_call_count = sum(1 for report in reports if _is_worker_call(report))
+def _build_rule_based_summary(entries: list[dict]) -> tuple[str, int, str]:
+    total_count = len(entries)
+    translation_count = sum(1 for entry in entries if entry.get('entry_type') == 'translation')
+    manual_count = sum(1 for entry in entries if entry.get('entry_type') == 'manual' and not _is_worker_call(entry))
+    worker_call_count = sum(1 for entry in entries if _is_worker_call(entry))
 
     if total_count == 0:
         return (
@@ -72,13 +79,13 @@ def _build_rule_based_summary(reports: list[Report]) -> tuple[str, int, str]:
             'rule-based-summary',
         )
 
-    content_lines = []
-    for report in reports:
-        text = (report.text_content or '').strip()
+    content_lines: list[str] = []
+    for entry in entries:
+        text = (entry.get('text_content') or '').strip()
         if not text:
             continue
-        if _is_worker_call(report):
-            content_lines.append(text.replace('[작업자 호출] ', '').strip())
+        if _is_worker_call(entry):
+            content_lines.append(text.replace('[작업자 호출] ', '').replace('[작업자 요청] ', '').strip())
         else:
             content_lines.append(text)
 
@@ -100,14 +107,14 @@ def _build_rule_based_summary(reports: list[Report]) -> tuple[str, int, str]:
     return summary_text, total_count, 'rule-based-summary'
 
 
-def _build_gemini_prompt(reports: list[Report]) -> str:
+def _build_gemini_prompt(entries: list[dict]) -> str:
     lines: list[str] = []
-    for index, report in enumerate(reports, start=1):
-        text = (report.text_content or '').strip()
+    for index, entry in enumerate(entries, start=1):
+        text = (entry.get('text_content') or '').strip()
         if not text:
             continue
-        entry_label = '작업자 호출' if _is_worker_call(report) else ('번역 기록' if report.entry_type == 'translation' else '수동 입력')
-        created_at = report.created_at.isoformat() if report.created_at else ''
+        entry_label = '작업자 호출' if _is_worker_call(entry) else ('번역 기록' if entry.get('entry_type') == 'translation' else '수동 입력')
+        created_at = entry.get('created_at') or ''
         lines.append(f'{index}. [{entry_label}] [{created_at}] {text}')
 
     joined_logs = '\n'.join(lines) if lines else '기록 없음'
@@ -134,33 +141,29 @@ def _preferred_gemini_model_name() -> str:
     return 'gemini-2.5-flash'
 
 
-def _build_today_summary(reports: list[Report]) -> tuple[str, int, str]:
-    if not reports:
-        return _build_rule_based_summary(reports)
+def _build_today_summary(entries: list[dict]) -> tuple[str, int, str]:
+    if not entries:
+        return _build_rule_based_summary(entries)
 
     if is_gemini_configured():
-        prompt = _build_gemini_prompt(reports)
+        prompt = _build_gemini_prompt(entries)
         summary_text = analyze_text(prompt, max_output_tokens=900).strip()
         if summary_text and not summary_text.startswith('AI analysis failed'):
-            return summary_text, len(reports), _preferred_gemini_model_name()
+            return summary_text, len(entries), _preferred_gemini_model_name()
 
-    return _build_rule_based_summary(reports)
+    return _build_rule_based_summary(entries)
 
 
 @router.get('/')
-def get_reports(db: Session = Depends(get_db)):
-    return db.query(Report).order_by(Report.created_at.desc()).all()
+def get_reports():
+    today = str(date.today())
+    return fetch_today_report_entries(today)
 
 
 @router.get('/today')
-def get_today_reports(db: Session = Depends(get_db)):
+def get_today_reports():
     today = str(date.today())
-    return (
-        db.query(Report)
-        .filter(Report.date == today)
-        .order_by(Report.created_at.desc())
-        .all()
-    )
+    return fetch_today_report_entries(today)
 
 
 @router.get('/summary/today')
@@ -201,14 +204,8 @@ def upsert_today_summary(data: DailySummaryUpsert, db: Session = Depends(get_db)
 @router.post('/summary/today/generate')
 def generate_today_summary(db: Session = Depends(get_db)):
     today = str(date.today())
-    reports = (
-        db.query(Report)
-        .filter(Report.date == today)
-        .order_by(Report.created_at.asc())
-        .all()
-    )
-
-    summary_text, source_count, model_name = _build_today_summary(reports)
+    entries = list(reversed(fetch_today_report_entries(today)))
+    summary_text, source_count, model_name = _build_today_summary(entries)
     summary = (
         db.query(DailySummary)
         .filter(DailySummary.summary_date == today)
@@ -230,32 +227,37 @@ def generate_today_summary(db: Session = Depends(get_db)):
 
 
 @router.post('/')
-def create_report(data: ReportCreate, db: Session = Depends(get_db)):
-    report = Report(
-        date=str(date.today()),
+def create_report(data: ReportCreate):
+    return insert_report_entry(
         entry_type=data.entry_type,
         text_content=data.text_content,
         translated_text=data.translated_text.strip() or None,
         source_language=data.source_language.strip().lower(),
         target_language=data.target_language.strip().lower(),
         author_name=data.author_name.strip() or 'Site Manager',
+        date_text=str(date.today()),
     )
-    db.add(report)
+
+
+@router.delete('/daily-log/today')
+def clear_today_daily_logs(db: Session = Depends(get_db)):
+    today = str(date.today())
+    clear_today_daily_log_entries(today)
+    db.query(DailySummary).filter(DailySummary.summary_date == today).delete(synchronize_session=False)
     db.commit()
-    db.refresh(report)
-    sync_report_log(report)
-    return report
+    return {'ok': True}
 
 
 @router.delete('/{report_id}')
-def delete_report(report_id: int, db: Session = Depends(get_db)):
-    report = db.query(Report).filter(Report.id == report_id).first()
-    if not report:
-        raise HTTPException(status_code=404, detail='Report not found.')
+def delete_report(report_id: str):
+    if ':' not in report_id:
+        raise HTTPException(status_code=400, detail='Legacy MySQL report ids are no longer supported.')
 
-    delete_report_log(report)
-    db.delete(report)
-    db.commit()
+    collection_name, mongo_id = report_id.split(':', 1)
+    if collection_name not in DAILY_LOG_COLLECTIONS:
+        raise HTTPException(status_code=400, detail='Unsupported log collection.')
+
+    delete_document_by_id(collection_name, mongo_id)
     return {'ok': True}
 
 
@@ -269,6 +271,7 @@ def _entry_label(entry: dict) -> str:
     if log_type == 'translation':
         return '번역 기록'
     return '수동 입력'
+
 
 
 def _build_rule_based_summary_from_entries(entries: list[dict]) -> tuple[str, int, str]:
@@ -305,6 +308,7 @@ def _build_rule_based_summary_from_entries(entries: list[dict]) -> tuple[str, in
     return summary_text, total_count, 'rule-based-summary'
 
 
+
 def _build_gemini_prompt_from_entries(entries: list[dict]) -> str:
     lines: list[str] = []
     for index, entry in enumerate(entries, start=1):
@@ -332,6 +336,7 @@ def _build_gemini_prompt_from_entries(entries: list[dict]) -> str:
     )
 
 
+
 def _build_today_summary_from_entries(entries: list[dict]) -> tuple[str, int, str]:
     if not entries:
         return _build_rule_based_summary_from_entries(entries)
@@ -343,6 +348,7 @@ def _build_today_summary_from_entries(entries: list[dict]) -> tuple[str, int, st
             return summary_text, len(entries), _preferred_gemini_model_name()
 
     return _build_rule_based_summary_from_entries(entries)
+
 
 @router.get('/daily-log/today')
 def get_today_daily_log_entries():

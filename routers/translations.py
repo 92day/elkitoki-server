@@ -5,7 +5,7 @@ from deep_translator import GoogleTranslator, MyMemoryTranslator
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
-from mongo_store import fetch_translation_history, insert_translation_request_log
+from mongo_store import fetch_translation_history
 
 router = APIRouter(prefix='/api', tags=['translations'])
 
@@ -109,12 +109,6 @@ def translate(payload: TranslateRequest):
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f'translation provider error: {exc}') from exc
 
-    insert_translation_request_log(
-        source_text=payload.text,
-        translated_text=translated_text,
-        source_language=payload.source_language,
-        target_language=payload.target_language,
-    )
 
     return TranslateResponse(
         translated_text=translated_text,

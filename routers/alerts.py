@@ -10,8 +10,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import SessionLocal, get_db
-from models.models import Alert, Report, SensorData, Zone
-from mongo_store import fetch_sensor_event_logs, fetch_sensor_status_logs, sync_alert_log, sync_report_log, sync_sensor_event_log, sync_sensor_status_log
+from models.models import Alert, SensorData, Zone
+from mongo_store import fetch_sensor_event_logs, fetch_sensor_status_logs, insert_worker_request_log, sync_alert_log, sync_sensor_event_log, sync_sensor_status_log
 
 try:
     import serial
@@ -324,28 +324,15 @@ def build_alert_from_payload(payload: dict[str, Any], db: Session) -> Optional[A
     return None
 
 
-def build_report_from_payload(payload: dict[str, Any]) -> Optional[Report]:
+def should_store_worker_request_log(payload: dict[str, Any]) -> bool:
     if payload.get('kind') != 'event' or not payload.get('active'):
-        return None
+        return False
 
     if payload.get('eventType') != 'worker_call_button':
-        return None
+        return False
 
     source = str(payload.get('source', ''))
-    if not source.startswith('manual_button'):
-        return None
-
-    worker = payload.get('worker')
-    worker_label = f'작업자 {worker}' if worker in {'A', 'B'} else '작업자'
-    return Report(
-        date=str(date.today()),
-        entry_type='manual',
-        text_content=f'[작업자 요청] {worker_label} 요청',
-        translated_text=None,
-        source_language='ko',
-        target_language='ko',
-        author_name='현장 버튼',
-    )
+    return source.startswith('manual_button')
 
 
 async def broadcast_sensor_update(data: dict[str, Any]) -> None:
@@ -372,18 +359,19 @@ async def process_sensor_payload(payload: dict[str, Any]) -> None:
         alert = build_alert_from_payload(payload, db)
         if alert:
             db.add(alert)
-        report = build_report_from_payload(payload)
-        if report:
-            db.add(report)
         db.commit()
         if alert:
             db.refresh(alert)
             sync_alert_log(alert, payload.get('eventType'))
-        if report:
-            db.refresh(report)
-            sync_report_log(report)
     finally:
         db.close()
+
+    if should_store_worker_request_log(payload):
+        insert_worker_request_log(
+            worker=payload.get('worker'),
+            source=str(payload.get('source', 'manual_button')),
+            created_at=payload.get('timestamp'),
+        )
 
     await broadcast_sensor_update({'event': 'sensor', 'data': payload})
 
