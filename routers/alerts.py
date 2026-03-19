@@ -388,6 +388,8 @@ async def process_sensor_payload(payload: dict[str, Any]) -> None:
 
     if payload.get('kind') == 'event' and payload.get('eventType') == 'fall_detected' and payload.get('active'):
         enqueue_device_command(device='uno-main', cmd='show_fall')
+    if payload.get('kind') == 'event' and payload.get('eventType') == 'noise_abnormal' and payload.get('active'):
+        enqueue_device_command(device='uno-main', cmd='show_noise', payload={'zone': str(payload.get('zone') or 'A')})
 
     if should_store_worker_request_log(payload):
         insert_worker_request_log(
@@ -530,6 +532,8 @@ async def read_arduino_serial():
         except Exception as exc:
             print(f'[Arduino] Serial connection failed: {exc}. Retrying in 5 seconds.')
             await asyncio.sleep(5)
+
+
 
 
 
