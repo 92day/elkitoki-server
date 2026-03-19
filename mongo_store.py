@@ -15,6 +15,7 @@ load_dotenv()
 _mongo_client = None
 _mongo_db = None
 ZONE_ID_BY_LABEL = {'A': 1, 'B': 2, 'C': 3}
+WORKER_NAME_BY_KEY = {'A': '이레드', 'B': '김그린'}
 DAILY_LOG_COLLECTIONS = ('translation_logs', 'worker_call_logs', 'manual_logs', 'alert_logs')
 REPORT_LOG_COLLECTIONS = ('translation_logs', 'worker_call_logs', 'manual_logs')
 
@@ -159,7 +160,7 @@ def insert_worker_request_log(
     source: str,
     created_at: str | None = None,
 ) -> dict[str, Any]:
-    worker_label = f'작업자 {worker}' if worker in {'A', 'B'} else '작업자'
+    worker_label = WORKER_NAME_BY_KEY.get(str(worker), '작업자')
     return insert_report_entry(
         entry_type='manual',
         text_content=f'[작업자 요청] {worker_label} 요청',
@@ -534,4 +535,5 @@ def fetch_sensor_event_logs(
         .limit(max(1, min(limit, 500)))
     )
     return [_normalize_sensor_document(document, is_event=True) for document in cursor]
+
 
