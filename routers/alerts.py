@@ -29,6 +29,25 @@ device_command_queue: list[dict[str, Any]] = []
 next_command_id = 1
 SENSOR_MYSQL_LOGGING_ENABLED = os.getenv('ENABLE_SENSORDATA_MYSQL', '0').strip().lower() in {'1', 'true', 'yes', 'on'}
 
+
+def enqueue_device_command(*, device: str, cmd: str, worker: Optional[str] = None, color: Optional[str] = None, state: Optional[str] = None, payload: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    global next_command_id
+
+    command = {
+        'id': next_command_id,
+        'device': device,
+        'cmd': cmd,
+        'worker': worker,
+        'color': color,
+        'state': state,
+        'payload': payload or {},
+        'status': 'pending',
+        'createdAt': now_iso(),
+    }
+    next_command_id += 1
+    device_command_queue.append(command)
+    return command
+
 STATUS_EXCLUDE_KEYS = {'kind', 'device', 'timestamp'}
 ZONE_ID_BY_LABEL = {'A': 1, 'B': 2, 'C': 3}
 ZONE_SOUND_FIELDS = {1: 'soundA', 2: 'soundB', 3: 'soundC'}
@@ -367,6 +386,9 @@ async def process_sensor_payload(payload: dict[str, Any]) -> None:
     finally:
         db.close()
 
+    if payload.get('kind') == 'event' and payload.get('eventType') == 'fall_detected' and payload.get('active'):
+        enqueue_device_command(device='uno-main', cmd='show_fall')
+
     if should_store_worker_request_log(payload):
         insert_worker_request_log(
             worker=payload.get('worker'),
@@ -464,15 +486,7 @@ async def receive_sensor_event(payload: dict[str, Any] = Body(...)):
 
 @device_router.post('/commands')
 def create_device_command(payload: DeviceCommandCreate):
-    global next_command_id
-
-    command = payload.model_dump()
-    command['id'] = next_command_id
-    command['status'] = 'pending'
-    command['createdAt'] = now_iso()
-    next_command_id += 1
-    device_command_queue.append(command)
-    return command
+    return enqueue_device_command(**payload.model_dump())
 
 
 @device_router.get('/commands/pending')
@@ -516,6 +530,7 @@ async def read_arduino_serial():
         except Exception as exc:
             print(f'[Arduino] Serial connection failed: {exc}. Retrying in 5 seconds.')
             await asyncio.sleep(5)
+
 
 
 
