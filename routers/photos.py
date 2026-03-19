@@ -16,6 +16,7 @@ load_dotenv(BASE_DIR / '.env', override=False)
 from database import get_db
 from gemini_client import analyze_image, is_gemini_configured
 from models.models import Alert, Photo
+from yolo_client import analyze_with_yolo
 
 router = APIRouter(prefix='/api/photos', tags=['photos'])
 
@@ -50,7 +51,16 @@ async def upload_photo(
         raise HTTPException(status_code=400, detail='Uploaded image file is empty.')
 
     filepath.write_bytes(contents)
+
+    # Gemini 분석
     ai_result, risk_detected = await _analyze_photo(contents, ext)
+
+    # YOLO 분석 추가
+    yolo_result = analyze_with_yolo(contents, ext)
+    if yolo_result["available"]:
+        ai_result = f"{ai_result}\n\n[YOLO Detection] {yolo_result['summary']}"
+        if yolo_result["risk_detected"]:
+            risk_detected = True
 
     photo = Photo(
         zone_id=zone_id,
@@ -66,13 +76,16 @@ async def upload_photo(
             Alert(
                 level='high',
                 message=f'[AI Photo Analysis] Risk detected - {ai_result[:80]}',
-                source='Gemini Vision',
+                source='Gemini+YOLO Vision',
             )
         )
 
     db.commit()
     db.refresh(photo)
-    return photo
+
+    response = photo.__dict__.copy()
+    response["yolo"] = yolo_result
+    return response
 
 
 @router.get('/file/{photo_id}')
