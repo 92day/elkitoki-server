@@ -19,9 +19,14 @@ CREATE TABLE IF NOT EXISTS `alerts` (
   `level` VARCHAR(20) NULL,
   `message` TEXT NULL,
   `source` VARCHAR(50) NULL,
+  `zone_id` INT NULL,
+  `zone_name` VARCHAR(50) NULL,
   `is_resolved` BOOLEAN NULL DEFAULT FALSE,
   `created_at` DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  KEY `idx_alerts_zone_id` (`zone_id`),
+  CONSTRAINT `fk_alerts_zone_id`
+    FOREIGN KEY (`zone_id`) REFERENCES `zones` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `progress` (
@@ -35,13 +40,28 @@ CREATE TABLE IF NOT EXISTS `progress` (
 CREATE TABLE IF NOT EXISTS `reports` (
   `id` INT NOT NULL AUTO_INCREMENT,
   `date` VARCHAR(20) NULL,
+  `entry_type` VARCHAR(20) NULL DEFAULT 'translation',
   `text_content` TEXT NULL,
   `translated_text` TEXT NULL,
   `source_language` VARCHAR(10) NULL DEFAULT 'ko',
   `target_language` VARCHAR(10) NULL,
   `author_name` VARCHAR(50) NULL,
   `created_at` DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  KEY `idx_reports_date` (`date`),
+  KEY `idx_reports_entry_type` (`entry_type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `daily_summaries` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `summary_date` VARCHAR(20) NOT NULL,
+  `summary_text` TEXT NOT NULL,
+  `source_count` INT NULL DEFAULT 0,
+  `model_name` VARCHAR(50) NULL,
+  `created_at` DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_daily_summaries_date` (`summary_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `translation_logs` (
@@ -82,8 +102,21 @@ CREATE TABLE IF NOT EXISTS `photos` (
     FOREIGN KEY (`zone_id`) REFERENCES `zones` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `users` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `username` VARCHAR(50) NOT NULL,
+  `password_hash` VARCHAR(255) NOT NULL,
+  `name` VARCHAR(50) NOT NULL,
+  `role` VARCHAR(50) NOT NULL DEFAULT 'site_manager',
+  `is_active` BOOLEAN NULL DEFAULT TRUE,
+  `created_at` DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_users_username` (`username`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `workers` (
   `id` INT NOT NULL AUTO_INCREMENT,
+  `user_id` INT NULL,
   `name` VARCHAR(50) NOT NULL,
   `role` VARCHAR(50) NULL,
   `phone` VARCHAR(20) NULL,
@@ -91,7 +124,10 @@ CREATE TABLE IF NOT EXISTS `workers` (
   `status` VARCHAR(20) NULL DEFAULT 'work',
   `created_at` DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
+  KEY `idx_workers_user_id` (`user_id`),
   KEY `idx_workers_zone_id` (`zone_id`),
+  CONSTRAINT `fk_workers_user_id`
+    FOREIGN KEY (`user_id`) REFERENCES `users` (`id`),
   CONSTRAINT `fk_workers_zone_id`
     FOREIGN KEY (`zone_id`) REFERENCES `zones` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -100,13 +136,11 @@ INSERT INTO `zones` (`id`, `name`, `description`, `task`, `risk_level`, `max_wor
 VALUES
   (1, 'Zone A', 'B2', 'Rebar Work', 'safe', 30),
   (2, 'Zone B', 'B1', 'Concrete', 'safe', 30),
-  (3, 'Zone C', '1F-3F', 'High-altitude Work', 'caution', 30),
-  (4, 'Zone D', '4F-6F', 'Frame Construction', 'safe', 30),
-  (5, 'Zone E', 'Roof', 'Roof Work', 'danger', 30),
-  (6, 'Zone F', 'Exterior', 'Facade Finishing', 'safe', 30)
+  (3, 'Zone C', '1F-3F', 'High-altitude Work', 'caution', 30)
 ON DUPLICATE KEY UPDATE
   `name` = VALUES(`name`),
   `description` = VALUES(`description`),
   `task` = VALUES(`task`),
   `risk_level` = VALUES(`risk_level`),
   `max_workers` = VALUES(`max_workers`);
+
