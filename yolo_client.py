@@ -1,4 +1,4 @@
-from __future__ import annotations
+癤풾rom __future__ import annotations
 
 import glob
 import os
@@ -31,13 +31,13 @@ PPE_KEYWORDS: dict[str, tuple[str, ...]] = {
 }
 
 PPE_LABELS = {
-    'helmet': '안전모',
-    'vest': '안전조끼',
-    'harness': '안전대',
-    'gloves': '장갑',
-    'boots': '안전화',
-    'goggles': '보안경',
-    'mask': '마스크/호흡보호구',
+    'helmet': '\uC548\uC804\uBAA8',
+    'vest': '\uC548\uC804\uC870\uB07C',
+    'harness': '\uC548\uC804\uB300',
+    'gloves': '\uC7A5\uAC11',
+    'boots': '\uC548\uC804\uD654',
+    'goggles': '\uBCF4\uC548\uACBD',
+    'mask': '\uB9C8\uC2A4\uD06C/\uD638\uD761\uBCF4\uD638\uAD6C',
 }
 
 PERSON_KEYWORDS = ('person', 'worker', 'human', 'man', 'woman', 'people')
@@ -168,28 +168,28 @@ def _assess_safety_risk(detections: list[dict[str, Any]]) -> dict[str, Any]:
 
     if ppe_missing_items:
         readable_items = [PPE_LABELS[item] for item in sorted(ppe_missing_items)]
-        warnings.append('보호구 미착용이 감지되었습니다: ' + ', '.join(readable_items))
-        recommended_actions.append('보호구 미착용 작업자를 즉시 확인하고 필요한 보호구를 착용시켜 주세요.')
+        warnings.append('\uBCF4\uD638\uAD6C \uBBF8\uCC29\uC6A9\uC774 \uAC10\uC9C0\uB418\uC5C8\uC2B5\uB2C8\uB2E4: ' + ', '.join(readable_items))
+        recommended_actions.append('\uBCF4\uD638\uAD6C \uBBF8\uCC29\uC6A9 \uC791\uC5C5\uC790\uB97C \uC989\uC2DC \uD655\uC778\uD558\uACE0 \uD544\uC694\uD55C \uBCF4\uD638\uAD6C\uB97C \uCC29\uC6A9\uC2DC\uCF1C \uC8FC\uC138\uC694.')
         risk_score += 3 + len(ppe_missing_items)
 
     if fall_hazards:
-        warnings.append('낙상 위험 요소가 감지되었습니다.')
-        recommended_actions.append('고소 작업 구간의 난간, 안전대, 작업 발판 상태를 즉시 점검해 주세요.')
+        warnings.append('\uB099\uC0C1 \uC704\uD5D8 \uC694\uC18C\uAC00 \uAC10\uC9C0\uB418\uC5C8\uC2B5\uB2C8\uB2E4.')
+        recommended_actions.append('\uACE0\uC18C \uC791\uC5C5 \uAD6C\uAC04\uC758 \uB09C\uAC04, \uC548\uC804\uB300, \uC791\uC5C5 \uBC1C\uD310 \uC0C1\uD0DC\uB97C \uC989\uC2DC \uC810\uAC80\uD574 \uC8FC\uC138\uC694.')
         risk_score += 4
 
     if fire_or_electric_hazards:
-        warnings.append('전기 또는 화재 관련 위험 패턴이 감지되었습니다.')
-        recommended_actions.append('전원, 케이블, 점화원 주변을 즉시 점검하고 필요 시 작업을 중지해 주세요.')
+        warnings.append('\uC804\uAE30 \uB610\uB294 \uD654\uC7AC \uAD00\uB828 \uC704\uD5D8 \uC9D5\uD6C4\uAC00 \uAC10\uC9C0\uB418\uC5C8\uC2B5\uB2C8\uB2E4.')
+        recommended_actions.append('\uC804\uC6D0, \uCF00\uC774\uBE14, \uC778\uD654\uBB3C \uC8FC\uBCC0\uC744 \uC989\uC2DC \uC810\uAC80\uD558\uACE0 \uD544\uC694 \uC2DC \uC791\uC5C5\uC744 \uC911\uB2E8\uD574 \uC8FC\uC138\uC694.')
         risk_score += 4
 
     if heavy_equipment:
         if person_count > 0:
-            warnings.append('중장비와 작업자가 같은 구역에 함께 감지되었습니다.')
-            recommended_actions.append('중장비 주변 접근 금지 구역을 확보하고 유도 인력을 배치해 주세요.')
+            warnings.append('\uC911\uC7A5\uBE44\uC640 \uC791\uC5C5\uC790\uAC00 \uAC19\uC740 \uAD6C\uC5ED\uC5D0\uC11C \uD568\uAED8 \uAC10\uC9C0\uB418\uC5C8\uC2B5\uB2C8\uB2E4.')
+            recommended_actions.append('\uC911\uC7A5\uBE44 \uC8FC\uBCC0 \uC811\uADFC \uAE08\uC9C0 \uAD6C\uC5ED\uC744 \uD45C\uC2DC\uD558\uACE0 \uC720\uB3C4 \uC778\uB825\uC744 \uBC30\uCE58\uD574 \uC8FC\uC138\uC694.')
             risk_score += 3
         else:
-            warnings.append('중장비 작업이 감지되었습니다.')
-            recommended_actions.append('중장비 이동 동선과 작업 반경을 다시 확인해 주세요.')
+            warnings.append('\uC911\uC7A5\uBE44 \uC791\uC5C5\uC774 \uAC10\uC9C0\uB418\uC5C8\uC2B5\uB2C8\uB2E4.')
+            recommended_actions.append('\uC911\uC7A5\uBE44 \uC774\uB3D9 \uB3D9\uC120\uACFC \uC791\uC5C5 \uBC18\uACBD\uC744 \uB2E4\uC2DC \uD655\uC778\uD574 \uC8FC\uC138\uC694.')
             risk_score += 1
 
     if risk_score >= 7:
@@ -204,14 +204,14 @@ def _assess_safety_risk(detections: list[dict[str, Any]]) -> dict[str, Any]:
     risk_detected = risk_level in {RISK_LEVEL_HIGH, RISK_LEVEL_MEDIUM} or bool(ppe_missing_items)
 
     if not detections:
-        warnings.append('탐지된 객체가 없습니다. 카메라 각도와 조명을 확인해 주세요.')
-        recommended_actions.append('사진을 더 넓은 각도에서 다시 촬영해 주세요.')
+        warnings.append('\uAC10\uC9C0\uB41C \uAC1D\uCCB4\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4. \uCE74\uBA54\uB77C \uAC01\uB3C4\uC640 \uC870\uBA85\uC744 \uD655\uC778\uD574 \uC8FC\uC138\uC694.')
+        recommended_actions.append('\uC0AC\uC9C4\uC744 \uB354 \uB113\uC740 \uAC01\uB3C4\uC5D0\uC11C \uB2E4\uC2DC \uCD2C\uC601\uD574 \uC8FC\uC138\uC694.')
 
     if not warnings:
-        warnings.append('현재 YOLO 클래스 기준으로 즉시 위험요소는 감지되지 않았습니다.')
+        warnings.append('\uD604\uC7AC YOLO \uBD84\uC11D \uAE30\uC900\uC73C\uB85C \uC989\uC2DC \uC704\uD5D8\uC694\uC18C\uB294 \uAC10\uC9C0\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.')
 
     if not recommended_actions:
-        recommended_actions.append('현장 순찰을 유지하고 보호구 착용 여부를 주기적으로 확인해 주세요.')
+        recommended_actions.append('\uD604\uC7A5 \uC8FC\uBCC0\uC744 \uC7AC\uC810\uAC80\uD558\uACE0 \uBCF4\uD638\uAD6C \uCC29\uC6A9 \uC5EC\uBD80\uB97C \uC8FC\uAE30\uC801\uC73C\uB85C \uD655\uC778\uD574 \uC8FC\uC138\uC694.')
 
     return {
         'risk_level': risk_level,
