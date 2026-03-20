@@ -6,7 +6,10 @@ import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
-import torch
+try:
+    import torch
+except Exception:
+    torch = None
 
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
@@ -160,6 +163,8 @@ def _get_model():
 
 
 def _device() -> str:
+    if torch is None:
+        return "cpu"
     return "mps" if torch.backends.mps.is_available() else "cpu"
 
 
