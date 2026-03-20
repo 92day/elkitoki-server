@@ -3,7 +3,7 @@
 import os
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -26,6 +26,94 @@ if not UPLOAD_DIR.is_absolute():
     UPLOAD_DIR = (BASE_DIR / UPLOAD_DIR).resolve()
 PHOTOS_DIR = UPLOAD_DIR / 'photos'
 PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _alert_level_from_risk(risk_level: str) -> str:
+    normalized = (risk_level or '').strip().lower()
+    if normalized == 'high':
+        return 'high'
+    if normalized == 'medium':
+        return 'mid'
+    if normalized == 'low':
+        return 'low'
+    if normalized == 'safe':
+        return 'mid'
+    return 'high'
+
+
+def _extract_gemini_ppe_warning(gemini_result: str) -> str:
+    for raw_line in gemini_result.splitlines():
+        line = ' '.join(raw_line.strip().split())
+        lowered = line.lower()
+        if 'ppe check' not in lowered:
+            continue
+        if any(token in lowered for token in ('missing', 'without', 'not wearing', 'no helmet', 'no vest', 'no harness', 'no gloves', 'no boots')):
+            return line
+    return ''
+
+
+def _extract_gemini_action(gemini_result: str) -> str:
+    for raw_line in gemini_result.splitlines():
+        line = ' '.join(raw_line.strip().split())
+        lowered = line.lower()
+        if lowered.startswith('4. recommended action') or lowered.startswith('recommended action'):
+            return line
+    return ''
+
+
+def _build_yolo_block(yolo_result: dict[str, Any]) -> str:
+    summary = yolo_result.get('summary') or 'No summary'
+    risk_level = str(yolo_result.get('risk_level', 'safe')).upper()
+    warnings = yolo_result.get('warnings') or []
+    ppe_missing = yolo_result.get('ppe_missing') or []
+    actions = yolo_result.get('recommended_actions') or []
+
+    lines = [
+        '[YOLO Safety Assessment]',
+        f'Risk Level: {risk_level}',
+        f'Detection Summary: {summary}',
+    ]
+
+    if warnings:
+        lines.append('Warnings: ' + ' | '.join(str(w) for w in warnings))
+    if ppe_missing:
+        lines.append('PPE Warning: Missing ' + ', '.join(str(item) for item in ppe_missing))
+    if actions:
+        lines.append('Recommended Actions:')
+        for idx, action in enumerate(actions[:3], start=1):
+            lines.append(f'{idx}. {action}')
+
+    return '\n'.join(lines)
+
+
+def _build_photo_alert_message(
+    ai_result: str,
+    yolo_result: dict[str, Any],
+    gemini_ppe_warning: str,
+    gemini_action: str,
+) -> str:
+    warnings = yolo_result.get('warnings') or []
+    ppe_missing = yolo_result.get('ppe_missing') or []
+    actions = yolo_result.get('recommended_actions') or []
+
+    parts: list[str] = ['[AI Photo Analysis]']
+    if ppe_missing:
+        parts.append('PPE missing: ' + ', '.join(str(item) for item in ppe_missing))
+    elif gemini_ppe_warning:
+        parts.append('PPE warning (Gemini): ' + gemini_ppe_warning)
+    elif warnings:
+        parts.append(str(warnings[0]))
+    else:
+        parts.append(ai_result[:100].replace('\n', ' '))
+
+    if actions:
+        parts.append('Action: ' + str(actions[0]))
+    elif gemini_action:
+        parts.append('Action: ' + gemini_action)
+    else:
+        parts.append('Action: Safety manager should perform immediate on-site check.')
+
+    return ' | '.join(parts)
 
 
 @router.get('/')
@@ -54,13 +142,14 @@ async def upload_photo(
 
     # Gemini 분석
     ai_result, risk_detected = await _analyze_photo(contents, ext)
+    gemini_result = ai_result
 
     # YOLO 분석 추가
     yolo_result = analyze_with_yolo(contents, ext)
-    if yolo_result["available"]:
-        ai_result = f"{ai_result}\n\n[YOLO Detection] {yolo_result['summary']}"
-        if yolo_result["risk_detected"]:
-            risk_detected = True
+    yolo_block = _build_yolo_block(yolo_result)
+    ai_result = f'{ai_result}\n\n{yolo_block}'
+    if yolo_result.get('risk_detected'):
+        risk_detected = True
 
     photo = Photo(
         zone_id=zone_id,
@@ -72,10 +161,16 @@ async def upload_photo(
     db.add(photo)
 
     if risk_detected:
+        yolo_risk_level = str(yolo_result.get('risk_level', 'safe')).lower()
+        if yolo_risk_level in {'safe', 'low'}:
+            yolo_risk_level = 'medium'
+        gemini_ppe_warning = _extract_gemini_ppe_warning(gemini_result)
+        gemini_action = _extract_gemini_action(gemini_result)
+        alert_level = _alert_level_from_risk(yolo_risk_level)
         db.add(
             Alert(
-                level='high',
-                message=f'[AI Photo Analysis] Risk detected - {ai_result[:80]}',
+                level=alert_level,
+                message=_build_photo_alert_message(ai_result, yolo_result, gemini_ppe_warning, gemini_action),
                 source='Gemini+YOLO Vision',
             )
         )
@@ -84,7 +179,10 @@ async def upload_photo(
     db.refresh(photo)
 
     response = photo.__dict__.copy()
-    response["yolo"] = yolo_result
+    response['yolo'] = yolo_result
+    response['risk_level'] = yolo_result.get('risk_level', 'safe')
+    response['ppe_missing'] = yolo_result.get('ppe_missing', [])
+    response['recommended_actions'] = yolo_result.get('recommended_actions', [])
     return response
 
 
@@ -137,7 +235,7 @@ async def _analyze_photo(image_bytes: bytes, ext: str) -> tuple[str, bool]:
         '1. Scene Summary: one short sentence\n'
         '2. Hazard Points: bullet list with the exact dangerous area or object and why it is dangerous. Write "- none" if safe.\n'
         '3. PPE Check: whether helmets, vests, harnesses, gloves, or boots appear to be missing\n'
-        '4. Recommended Action: one short action for the manager\n'
+        '4. Recommended Action: up to 3 short, actionable instructions for the safety manager\n'
         '5. Final line must be exactly RISK:YES or RISK:NO\n'
         'If there is a fall risk, struck-by risk, heavy equipment conflict, fire/electrical issue, or missing PPE, mark RISK:YES.'
     )
