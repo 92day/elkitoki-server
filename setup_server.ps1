@@ -18,4 +18,5 @@ if (-not (Test-Path '.venv')) {
 Write-Host ''
 Write-Host '[server] setup complete'
 Write-Host '[server] activate: .\.venv\Scripts\Activate.ps1'
-Write-Host '[server] run: python -m uvicorn main:app --reload'
+Write-Host '[server] run: python main.py'
+Write-Host '[server] alt : python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload'

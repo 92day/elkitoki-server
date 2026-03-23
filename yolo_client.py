@@ -3,17 +3,15 @@
 import glob
 import os
 import tempfile
+import importlib
 from pathlib import Path
 from typing import Any
-
-try:
-    import torch
-except Exception:  # pragma: no cover
-    torch = None
 
 os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
 
 _MODEL = None
+_TORCH = None
+_TORCH_LOADED = False
 
 RISK_LEVEL_HIGH = 'high'
 RISK_LEVEL_MEDIUM = 'medium'
@@ -48,6 +46,27 @@ FALL_HAZARD_KEYWORDS = ('fall', 'edge', 'ladder', 'scaffold', 'unprotected', 'op
 FIRE_ELECTRIC_KEYWORDS = ('fire', 'smoke', 'spark', 'flame', 'electric', 'cable', 'wire', 'short')
 
 
+def _yolo_enabled() -> bool:
+    return os.getenv('ENABLE_YOLO', '1').strip().lower() not in {'0', 'false', 'no', 'off'}
+
+
+def _get_torch_module():
+    global _TORCH, _TORCH_LOADED
+    if _TORCH_LOADED:
+        return _TORCH
+
+    _TORCH_LOADED = True
+    if not _yolo_enabled():
+        _TORCH = None
+        return _TORCH
+
+    try:
+        _TORCH = importlib.import_module('torch')
+    except Exception:  # pragma: no cover
+        _TORCH = None
+    return _TORCH
+
+
 def _normalize_label(raw: str) -> str:
     return str(raw).strip().lower().replace('-', '_').replace(' ', '_')
 
@@ -61,6 +80,9 @@ def _class_name(names: Any, cls_id: int) -> str:
 
 
 def _resolve_model_path() -> str | None:
+    if not _yolo_enabled():
+        return None
+
     explicit_path = (os.getenv('YOLO_MODEL_PATH') or '').strip()
     if explicit_path:
         candidate = Path(explicit_path).expanduser()
@@ -91,6 +113,7 @@ def _resolve_model_path() -> str | None:
 
 
 def _torch_device() -> str:
+    torch = _get_torch_module()
     try:
         if torch is not None and getattr(torch.backends, 'mps', None) and torch.backends.mps.is_available():
             return 'mps'
@@ -105,6 +128,9 @@ def _get_model():
     global _MODEL
     if _MODEL is not None:
         return _MODEL
+
+    if not _yolo_enabled():
+        return None
 
     model_path = _resolve_model_path()
     if not model_path:

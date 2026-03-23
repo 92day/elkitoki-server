@@ -440,7 +440,7 @@ async def _analyze_photo(image_bytes: bytes, ext: str, zone_label: str, yolo_res
     )
 
     try:
-        result_text = analyze_image(prompt, image_bytes, mime_type, max_output_tokens=1800)
+        result_text = analyze_image(prompt, image_bytes, mime_type, max_output_tokens=2800)
     except Exception as error:
         return f'AI analysis failed (Gemini Vision): {error}', False
 
