@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
+import uvicorn
 
 from database import SessionLocal, engine
 from models.models import Alert, Base, Photo, SensorData, User, Worker, Zone
@@ -184,4 +185,11 @@ os.makedirs(uploads_dir, exist_ok=True)
 os.makedirs(os.path.join(uploads_dir, 'audio'), exist_ok=True)
 os.makedirs(os.path.join(uploads_dir, 'photos'), exist_ok=True)
 app.mount('/uploads', StaticFiles(directory=uploads_dir), name='uploads')
+
+
+if __name__ == '__main__':
+    host = os.getenv('UVICORN_HOST', '0.0.0.0')
+    port = int(os.getenv('PORT', os.getenv('UVICORN_PORT', '8000')))
+    reload_enabled = os.getenv('UVICORN_RELOAD', '1').strip().lower() in {'1', 'true', 'yes', 'on'}
+    uvicorn.run('main:app', host=host, port=port, reload=reload_enabled)
 

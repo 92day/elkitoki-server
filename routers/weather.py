@@ -11,7 +11,7 @@ router = APIRouter(prefix="/api/weather", tags=["weather"])
 
 SEOUL_LAT = 37.5665
 SEOUL_LON = 126.9780
-CACHE_TTL_SECONDS = 300
+CACHE_TTL_SECONDS = 3600
 _weather_cache = {"expires_at": 0.0, "data": None}
 
 
