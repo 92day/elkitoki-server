@@ -301,8 +301,8 @@ def _alert_level_from_display(display_level: str) -> str:
 
 
 def _build_photo_alert_message(zone_label: str, risk_types: list[str], recommended_action: str, scene_summary: str) -> str:
-    risk_part = ', '.join(risk_types[:2]) if risk_types else scene_summary
-    return f'[\uC0AC\uC9C4 \uBD84\uC11D] {zone_label} {risk_part} \u00B7 {recommended_action}'
+    action_text = (recommended_action or '').strip() or '\uD604\uC7A5 \uC0C1\uD0DC\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694.'
+    return f'[\uC0AC\uC9C4 \uBD84\uC11D] {action_text}'
 
 
 @router.get('/')
