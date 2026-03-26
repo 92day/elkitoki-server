@@ -123,6 +123,12 @@ def patch_legacy_schema() -> None:
                 conn.execute(text('ALTER TABLE alerts ADD COLUMN zone_id INTEGER NULL'))
             if 'zone_name' not in alert_columns:
                 conn.execute(text('ALTER TABLE alerts ADD COLUMN zone_name VARCHAR(50) NULL'))
+            if 'status' not in alert_columns:
+                conn.execute(text("ALTER TABLE alerts ADD COLUMN status VARCHAR(20) DEFAULT 'pending'"))
+            if 'handled_at' not in alert_columns:
+                conn.execute(text('ALTER TABLE alerts ADD COLUMN handled_at DATETIME NULL'))
+            conn.execute(text("UPDATE alerts SET status = 'resolved' WHERE (status IS NULL OR TRIM(status) = '') AND is_resolved = 1"))
+            conn.execute(text("UPDATE alerts SET status = 'pending' WHERE status IS NULL OR TRIM(status) = ''"))
 
         if 'reports' in table_names:
             report_columns = {column['name'] for column in inspector.get_columns('reports')}

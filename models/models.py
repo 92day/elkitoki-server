@@ -58,8 +58,10 @@ class Alert(Base):
     source = Column(String(50))
     zone_id = Column(Integer, ForeignKey('zones.id'), nullable=True)
     zone_name = Column(String(50), nullable=True)
+    status = Column(String(20), default='pending')
     is_resolved = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    handled_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class Photo(Base):
