@@ -223,10 +223,20 @@ def sync_alert_log(alert, event_type: str | None = None) -> None:
             'source': getattr(alert, 'source', None),
             'zone_id': getattr(alert, 'zone_id', None),
             'zone_name': getattr(alert, 'zone_name', None),
+            'status': getattr(alert, 'status', None),
+            'is_resolved': getattr(alert, 'is_resolved', None),
+            'handled_at': getattr(alert, 'handled_at', None).isoformat() if getattr(alert, 'handled_at', None) else None,
             'event_type': event_type,
             'created_at': getattr(alert, 'created_at', None).isoformat() if getattr(alert, 'created_at', None) else _now_iso(),
         },
     )
+
+
+def delete_alert_logs(mysql_alert_id: Any) -> None:
+    db = get_mongo_db()
+    if db is None:
+        return
+    db['alert_logs'].delete_many({'mysql_alert_id': mysql_alert_id})
 
 
 def sync_sensor_status_log(payload: dict[str, Any]) -> None:

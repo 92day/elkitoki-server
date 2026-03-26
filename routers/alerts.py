@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from database import SessionLocal, get_db
 from models.models import Alert, SensorData, Zone
-from mongo_store import fetch_sensor_event_logs, fetch_sensor_status_logs, insert_worker_request_log, sync_alert_log, sync_sensor_event_log, sync_sensor_status_log
+from mongo_store import delete_alert_logs, fetch_sensor_event_logs, fetch_sensor_status_logs, insert_worker_request_log, sync_alert_log, sync_sensor_event_log, sync_sensor_status_log
 
 try:
     import serial
@@ -28,6 +28,10 @@ latest_sensor_cache: dict[str, dict[str, Any]] = {}
 device_command_queue: list[dict[str, Any]] = []
 next_command_id = 1
 SENSOR_MYSQL_LOGGING_ENABLED = os.getenv('ENABLE_SENSORDATA_MYSQL', '0').strip().lower() in {'1', 'true', 'yes', 'on'}
+ALERT_STATUS_PENDING = 'pending'
+ALERT_STATUS_RESOLVED = 'resolved'
+ALERT_STATUSES = {ALERT_STATUS_PENDING, ALERT_STATUS_RESOLVED}
+ALERT_LEVEL_PRIORITY = {'high': 3, 'mid': 2, 'medium': 2, 'low': 1}
 
 
 def enqueue_device_command(*, device: str, cmd: str, worker: Optional[str] = None, color: Optional[str] = None, state: Optional[str] = None, payload: Optional[dict[str, Any]] = None) -> dict[str, Any]:
@@ -61,6 +65,10 @@ class AlertCreate(BaseModel):
     source: Optional[str] = 'Manual Input'
     zone_id: Optional[int] = None
     zone_name: Optional[str] = None
+
+
+class AlertStatusUpdate(BaseModel):
+    status: str
 
 
 class DeviceCommandCreate(BaseModel):
@@ -101,6 +109,43 @@ def map_zone_name_to_id(zone_name: Optional[str]) -> Optional[int]:
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def normalize_alert_level(level: Any) -> str:
+    normalized = str(level or '').strip().lower()
+    if normalized == 'medium':
+        return 'mid'
+    if normalized not in ALERT_LEVEL_PRIORITY:
+        return 'low'
+    return normalized
+
+
+def normalize_alert_status(status: Any) -> str:
+    normalized = str(status or '').strip().lower()
+    if normalized not in ALERT_STATUSES:
+        return ALERT_STATUS_PENDING
+    return normalized
+
+
+def hydrate_alert_state(alert: Alert) -> Alert:
+    alert.level = normalize_alert_level(getattr(alert, 'level', None))
+    alert.status = normalize_alert_status(getattr(alert, 'status', None))
+    alert.is_resolved = alert.status == ALERT_STATUS_RESOLVED
+    if alert.status != ALERT_STATUS_RESOLVED:
+        alert.handled_at = None
+    return alert
+
+
+def apply_alert_status(alert: Alert, status: str) -> Alert:
+    normalized = normalize_alert_status(status)
+    alert.status = normalized
+    alert.is_resolved = normalized == ALERT_STATUS_RESOLVED
+    alert.handled_at = now_utc() if normalized == ALERT_STATUS_RESOLVED else None
+    return alert
 
 
 def coerce_noise_score(value: Any) -> Optional[int]:
@@ -315,6 +360,8 @@ def build_alert_from_payload(payload: dict[str, Any], db: Session) -> Optional[A
             source='Sound Sensor',
             zone_id=zone_id,
             zone_name=resolved_zone_name or zone_label,
+            status=ALERT_STATUS_PENDING,
+            is_resolved=False,
         )
 
     if event_type == 'fall_detected':
@@ -324,6 +371,8 @@ def build_alert_from_payload(payload: dict[str, Any], db: Session) -> Optional[A
             source='Nano Tilt',
             zone_id=zone_id,
             zone_name=resolved_zone_name,
+            status=ALERT_STATUS_PENDING,
+            is_resolved=False,
         )
 
     if event_type == 'worker_call_button':
@@ -339,6 +388,8 @@ def build_alert_from_payload(payload: dict[str, Any], db: Session) -> Optional[A
             source='Call Input',
             zone_id=zone_id,
             zone_name=resolved_zone_name,
+            status=ALERT_STATUS_PENDING,
+            is_resolved=False,
         )
 
     return None
@@ -402,24 +453,45 @@ async def process_sensor_payload(payload: dict[str, Any]) -> None:
 
 
 @router.get('/')
-def get_alerts(db: Session = Depends(get_db)):
-    return db.query(Alert).filter(Alert.is_resolved.is_(False)).order_by(Alert.created_at.desc()).all()
+def get_alerts(include_resolved: bool = Query(default=True), db: Session = Depends(get_db)):
+    query = db.query(Alert)
+    if not include_resolved:
+        query = query.filter(Alert.status != ALERT_STATUS_RESOLVED)
+    alerts = query.order_by(Alert.created_at.desc()).all()
+    return [hydrate_alert_state(alert) for alert in alerts]
 
 
 @router.post('/')
 def create_alert(data: AlertCreate, db: Session = Depends(get_db)):
     zone_id, zone_name = resolve_zone_name(db, data.zone_id, data.zone_name)
     alert = Alert(
-        level=data.level,
+        level=normalize_alert_level(data.level),
         message=data.message,
         source=data.source,
         zone_id=zone_id,
         zone_name=zone_name,
+        status=ALERT_STATUS_PENDING,
+        is_resolved=False,
     )
     db.add(alert)
     db.commit()
     db.refresh(alert)
+    hydrate_alert_state(alert)
     sync_alert_log(alert, 'manual_alert')
+    return alert
+
+
+@router.patch('/{alert_id}')
+def update_alert(alert_id: int, payload: AlertStatusUpdate, db: Session = Depends(get_db)):
+    alert = db.query(Alert).filter(Alert.id == alert_id).first()
+    if not alert:
+        raise HTTPException(status_code=404, detail='Alert not found.')
+
+    apply_alert_status(alert, payload.status)
+    db.commit()
+    db.refresh(alert)
+    hydrate_alert_state(alert)
+    sync_alert_log(alert, f'alert_status:{alert.status}')
     return alert
 
 
@@ -429,9 +501,24 @@ def resolve_alert(alert_id: int, db: Session = Depends(get_db)):
     if not alert:
         raise HTTPException(status_code=404, detail='Alert not found.')
 
-    alert.is_resolved = True
+    apply_alert_status(alert, ALERT_STATUS_RESOLVED)
     db.commit()
-    return {'message': 'Resolved'}
+    db.refresh(alert)
+    hydrate_alert_state(alert)
+    sync_alert_log(alert, 'alert_resolved')
+    return {'message': 'Resolved', 'status': alert.status}
+
+
+@router.delete('/{alert_id}')
+def delete_alert(alert_id: int, db: Session = Depends(get_db)):
+    alert = db.query(Alert).filter(Alert.id == alert_id).first()
+    if not alert:
+        raise HTTPException(status_code=404, detail='Alert not found.')
+
+    delete_alert_logs(alert.id)
+    db.delete(alert)
+    db.commit()
+    return {'ok': True}
 
 
 @sensor_router.websocket('/ws')

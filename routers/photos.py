@@ -197,6 +197,45 @@ def _vision_source(gemini_text: str, yolo_result: dict[str, Any]) -> str:
     return 'Gemini'
 
 
+def _trim_short_text(text: str, limit: int = 26) -> str:
+    cleaned = ' '.join(str(text or '').split()).strip()
+    if not cleaned:
+        return ''
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[: max(0, limit - 1)].rstrip(' ,.') + '…'
+
+
+def _compact_photo_action(recommended_action: str, risk_types: list[str]) -> str:
+    lowered = (recommended_action or '').lower()
+
+    keyword_actions = [
+        (('안전조끼', 'vest', 'hi-vis', 'reflective'), '안전조끼 착용 조치'),
+        (('안전모', 'helmet', 'hardhat'), '안전모 착용 조치'),
+        (('안전대', 'harness', 'lifeline'), '안전대 착용 조치'),
+        (('장갑', 'gloves'), '장갑 착용 조치'),
+        (('안전화', 'boots'), '안전화 착용 조치'),
+        (('보안경', 'goggles'), '보안경 착용 조치'),
+        (('마스크', 'mask', 'respirator'), '마스크 착용 조치'),
+        (('전기', 'electric', 'wire', 'cable', 'spark', 'fire', 'flame', 'smoke'), '전기·화재 구역 점검'),
+        (('낙상', 'fall', 'ladder', 'scaffold', 'edge', 'opening'), '낙상 위험 구간 점검'),
+        (('통로', 'walkway', 'blocked', 'path', 'stacked', 'passage'), '통로 적치 상태 점검'),
+        (('중장비', 'excavator', 'forklift', 'crane', 'truck', 'equipment', 'loader', 'backhoe'), '중장비 접근 구간 점검'),
+    ]
+
+    for keywords, action in keyword_actions:
+        if any(keyword in lowered for keyword in keywords):
+            return action
+
+    if risk_types:
+        first_risk = str(risk_types[0])
+        if '점검' in first_risk:
+            return first_risk.replace('필요', '').strip()
+        return f'{_trim_short_text(first_risk, 18)} 확인'
+
+    return '현장 즉시 점검'
+
+
 def _build_yolo_block(yolo_result: dict[str, Any]) -> str:
     summary = yolo_result.get('summary') or 'No summary'
     risk_level = str(yolo_result.get('risk_level', 'safe')).upper()
@@ -301,8 +340,9 @@ def _alert_level_from_display(display_level: str) -> str:
 
 
 def _build_photo_alert_message(zone_label: str, risk_types: list[str], recommended_action: str, scene_summary: str) -> str:
-    action_text = (recommended_action or '').strip() or '\uD604\uC7A5 \uC0C1\uD0DC\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694.'
-    return f'[\uC0AC\uC9C4 \uBD84\uC11D] {action_text}'
+    risk_summary = _trim_short_text(risk_types[0], 20) if risk_types else '위험요소 점검 필요'
+    action_summary = _compact_photo_action(recommended_action, risk_types)
+    return f'[\uC0AC\uC9C4 \uBD84\uC11D] {risk_summary}. {action_summary}.'
 
 
 @router.get('/')
